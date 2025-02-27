@@ -2,11 +2,14 @@ package validation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/proto"
+	admissionv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	k8scorev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -18,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	computev1alpha "go.datum.net/workload-operator/api/v1alpha"
@@ -553,6 +557,35 @@ func TestValidateWorkloads(t *testing.T) {
 			expectedErrors: field.ErrorList{
 				field.Forbidden(field.NewPath("spec.template.spec.networkInterfaces[0].network"), ""),
 			},
+		},
+		"network use propagates extra metadata": {
+			workload: MakeSandboxWorkload("test"),
+			opts: WorkloadValidationOptions{
+				AdmissionRequest: admission.Request{
+					AdmissionRequest: admissionv1.AdmissionRequest{
+						UserInfo: authenticationv1.UserInfo{
+							Extra: map[string]authenticationv1.ExtraValue{
+								"key": []string{"extravalue"},
+							},
+						},
+					},
+				},
+			},
+			interceptorFuncs: &interceptor.Funcs{
+				Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if sar, ok := obj.(*authorizationv1.SubjectAccessReview); !ok {
+						return fmt.Errorf("SubjectAccessReview not found in request")
+					} else if sar.Spec.Extra == nil {
+						return fmt.Errorf("expected Extra field to have a value, got nil")
+					} else if len(sar.Spec.Extra["key"]) == 0 {
+						return fmt.Errorf("expected Extra field entry have a value, got an empty slice")
+					} else if v := sar.Spec.Extra["key"][0]; v != "extravalue" {
+						return fmt.Errorf(`expected Extra field entry value to be "extravalue", got %s`, v)
+					}
+					return client.Create(ctx, obj, opts...)
+				},
+			},
+			expectedErrors: field.ErrorList{},
 		},
 	}
 

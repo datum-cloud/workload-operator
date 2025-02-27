@@ -97,6 +97,11 @@ func validateInstanceNetworkInterfaces(
 			allErrs = append(allErrs, field.Invalid(networkNameField, networkInterface.Network, msg))
 		}
 
+		extra := map[string]authorizationv1.ExtraValue{}
+		for k, v := range opts.AdmissionRequest.UserInfo.Extra {
+			extra[k] = authorizationv1.ExtraValue(v)
+		}
+
 		review := authorizationv1.SubjectAccessReview{
 			Spec: authorizationv1.SubjectAccessReviewSpec{
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
@@ -108,6 +113,7 @@ func validateInstanceNetworkInterfaces(
 					Namespace: opts.Workload.Namespace,
 				},
 				User:   opts.AdmissionRequest.UserInfo.Username,
+				Extra:  extra,
 				Groups: opts.AdmissionRequest.UserInfo.Groups,
 				UID:    opts.AdmissionRequest.UserInfo.UID,
 			},
