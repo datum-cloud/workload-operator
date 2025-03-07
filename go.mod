@@ -7,7 +7,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	go.datum.net/network-services-operator v0.0.0-20250102193121-b4bcc249023a
 	golang.org/x/crypto v0.31.0
 	google.golang.org/protobuf v1.35.1
