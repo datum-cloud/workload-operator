@@ -1,0 +1,31 @@
+kind: CustomResourceStateMetrics
+spec:
+  resources:
+    - groupVersionKind:
+        group: compute.datumapis.com
+        kind: WorkloadDeployment
+        version: v1alpha
+      metricNamePrefix: "workload_deployment"
+      labelsFromPath:
+        namespace: [metadata, namespace]
+        name: [metadata, name]
+      metrics:
+        - name: "info"
+          help: "Information about workload deployment"
+          each:
+            type: Info
+            info:
+              labelsFromPath:
+                uid: [metadata, uid]
+                compute_datumapis_com_workload_uid: [metadata, labels, compute_datumapis_com_workload_uid]
+        - name: "status_condition"
+          help: "The current status conditions of the workload deployment"
+          each:
+            type: Gauge
+            gauge:
+              path: [status, conditions]
+              labelsFromPath:
+                condition: [type]
+                reason: [reason]
+                status: [status]
+              valueFrom: [status]
