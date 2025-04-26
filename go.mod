@@ -11,9 +11,9 @@ require (
 	go.datum.net/network-services-operator v0.0.0-20250102193121-b4bcc249023a
 	golang.org/x/crypto v0.36.0
 	google.golang.org/protobuf v1.36.6
-	k8s.io/api v0.32.1
-	k8s.io/apimachinery v0.32.1
-	k8s.io/client-go v0.32.1
+	k8s.io/api v0.33.0
+	k8s.io/apimachinery v0.33.0
+	k8s.io/client-go v0.33.0
 	sigs.k8s.io/controller-runtime v0.20.4
 	sigs.k8s.io/gateway-api v1.2.1
 )
