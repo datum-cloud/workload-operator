@@ -9,8 +9,8 @@ require (
 	github.com/onsi/gomega v1.37.0
 	github.com/stretchr/testify v1.10.0
 	go.datum.net/network-services-operator v0.1.0
-	golang.org/x/crypto v0.37.0
-	golang.org/x/sync v0.13.0
+	golang.org/x/crypto v0.38.0
+	golang.org/x/sync v0.14.0
 	google.golang.org/protobuf v1.36.6
 	k8s.io/api v0.32.1
 	k8s.io/apimachinery v0.32.1
@@ -81,9 +81,9 @@ require (
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/term v0.31.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/term v0.32.0 // indirect
+	golang.org/x/text v0.25.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
