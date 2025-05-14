@@ -8,7 +8,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
 	github.com/stretchr/testify v1.10.0
-	go.datum.net/network-services-operator v0.1.0
+	go.datum.net/network-services-operator v0.2.1
 	golang.org/x/crypto v0.37.0
 	golang.org/x/sync v0.13.0
 	google.golang.org/protobuf v1.36.6
