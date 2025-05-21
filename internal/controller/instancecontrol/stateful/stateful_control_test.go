@@ -37,11 +37,11 @@ func TestFreshDeployment(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, actions, 2)
 
-	assert.Equal(t, "test-deploy-0", actions[0].ObjectName)
+	assert.Equal(t, "test-fresh-deploy-0", actions[0].ObjectName)
 	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[0].ActionType())
 	assert.False(t, actions[0].IsSkipped())
 
-	assert.Equal(t, "test-deploy-1", actions[1].ObjectName)
+	assert.Equal(t, "test-fresh-deploy-1", actions[1].ObjectName)
 	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[1].ActionType())
 	assert.True(t, actions[1].IsSkipped())
 }
