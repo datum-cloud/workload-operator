@@ -10,6 +10,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
 	"go.datum.net/workload-operator/api/v1alpha"
 	"go.datum.net/workload-operator/internal/controller/instancecontrol"
@@ -20,14 +21,14 @@ var (
 )
 
 func init() {
-	v1alpha.AddToScheme(scheme)
+	utilruntime.Must(v1alpha.AddToScheme(scheme))
 }
 
 func TestFreshDeployment(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	deployment := getWorkloadDeployment("test-deploy", "default", 2)
+	deployment := getWorkloadDeployment("test-fresh-deploy", 2)
 
 	// No instances
 	var currentInstances []v1alpha.Instance
@@ -49,7 +50,7 @@ func TestUpdateWithAllReadyInstances(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	deployment := getWorkloadDeployment("test-deploy", "default", 2)
+	deployment := getWorkloadDeployment("test-deploy", 2)
 
 	var currentInstances []v1alpha.Instance
 	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
@@ -75,7 +76,7 @@ func TestScaleUpWithNotReadyInstance(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	deployment := getWorkloadDeployment("test-deploy", "default", 3)
+	deployment := getWorkloadDeployment("test-deploy", 3)
 
 	var currentInstances []v1alpha.Instance
 	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
@@ -105,7 +106,7 @@ func TestScaleDownWithAllReadyInstances(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	deployment := getWorkloadDeployment("test-deploy", "default", 1)
+	deployment := getWorkloadDeployment("test-deploy", 1)
 
 	var currentInstances []v1alpha.Instance
 	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
@@ -123,12 +124,12 @@ func TestScaleDownWithAllReadyInstances(t *testing.T) {
 
 // Add more test functions below for different scenarios.
 
-func getWorkloadDeployment(name, namespace string, minReplicas int32) *v1alpha.WorkloadDeployment {
-	instance := getInstanceTemplate(name, namespace, 0)
+func getWorkloadDeployment(name string, minReplicas int32) *v1alpha.WorkloadDeployment {
+	instance := getInstanceTemplate(name, 0)
 	deployment := &v1alpha.WorkloadDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "default",
 		},
 		Spec: v1alpha.WorkloadDeploymentSpec{
 			ScaleSettings: v1alpha.HorizontalScaleSettings{
@@ -146,7 +147,7 @@ func getWorkloadDeployment(name, namespace string, minReplicas int32) *v1alpha.W
 }
 
 func getInstanceForDeployment(deployment *v1alpha.WorkloadDeployment, ordinal int) *v1alpha.Instance {
-	instance := getInstance(deployment.Name, deployment.Namespace, ordinal)
+	instance := getInstance(deployment.Name, ordinal)
 	instance.Spec.Controller = &v1alpha.InstanceController{
 		TemplateHash: instancecontrol.ComputeHash(deployment.Spec.Template),
 	}
@@ -154,8 +155,8 @@ func getInstanceForDeployment(deployment *v1alpha.WorkloadDeployment, ordinal in
 	return instance
 }
 
-func getInstance(name, namespace string, ordinal int) *v1alpha.Instance {
-	instance := getInstanceTemplate(name, namespace, ordinal)
+func getInstance(name string, ordinal int) *v1alpha.Instance {
+	instance := getInstanceTemplate(name, ordinal)
 	instance.CreationTimestamp = metav1.Now()
 	instance.Labels = map[string]string{
 		v1alpha.InstanceIndexLabel: strconv.Itoa(ordinal),
@@ -176,12 +177,12 @@ func getInstance(name, namespace string, ordinal int) *v1alpha.Instance {
 	return instance
 }
 
-func getInstanceTemplate(name, namespace string, ordinal int) *v1alpha.Instance {
+func getInstanceTemplate(name string, ordinal int) *v1alpha.Instance {
 	instanceName := fmt.Sprintf("%s-%d", name, ordinal)
 	instance := &v1alpha.Instance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instanceName,
-			Namespace: namespace,
+			Namespace: "default",
 		},
 		Spec: v1alpha.InstanceSpec{
 			Runtime: v1alpha.InstanceRuntimeSpec{

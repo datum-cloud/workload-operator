@@ -50,7 +50,7 @@ func TestGetInstanceOrdinal(t *testing.T) {
 }
 
 func TestDescendingOrdinal(t *testing.T) {
-	var actions []instancecontrol.Action
+	actions := make([]instancecontrol.Action, 0, 4)
 
 	perm := rand.Perm(4)
 	for i := range perm {

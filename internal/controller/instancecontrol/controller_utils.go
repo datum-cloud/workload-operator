@@ -26,5 +26,5 @@ func ComputeHash(obj interface{}) string {
 // ensuring the hash does not change when a pointer changes.
 func DeepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 	hasher.Reset()
-	fmt.Fprintf(hasher, "%v", dump.ForHash(objectToWrite))
+	_, _ = fmt.Fprintf(hasher, "%v", dump.ForHash(objectToWrite))
 }
