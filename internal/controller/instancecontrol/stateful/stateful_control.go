@@ -20,7 +20,7 @@ import (
 type statefulControl struct {
 }
 
-func NewStatefulControl() instancecontrol.Strategy {
+func New() instancecontrol.Strategy {
 	return &statefulControl{}
 }
 
@@ -80,11 +80,7 @@ func (c *statefulControl) GetActions(
 				},
 			}
 
-			if desiredInstances[i].Labels == nil {
-				desiredInstances[i].Labels = map[string]string{}
-			}
-
-			desiredInstances[i].Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(int(i))
+			addInstanceControllerLabels(desiredInstances[i], getInstanceOrdinal(desiredInstances[i].Name), deployment)
 
 			if err := controllerutil.SetControllerReference(deployment, desiredInstances[i], scheme); err != nil {
 				return nil, fmt.Errorf("failed to set controller reference: %w", err)
@@ -111,12 +107,7 @@ func (c *statefulControl) GetActions(
 				updatedInstance.Annotations = deployment.Spec.Template.Annotations
 				updatedInstance.Labels = deployment.Spec.Template.Labels
 
-				if updatedInstance.Labels == nil {
-					updatedInstance.Labels = map[string]string{}
-				}
-
-				// Shouldn't get removed, but just in case.
-				updatedInstance.Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(getInstanceOrdinal(instance.Name))
+				addInstanceControllerLabels(updatedInstance, getInstanceOrdinal(updatedInstance.Name), deployment)
 
 				updatedInstance.Spec = deployment.Spec.Template.Spec
 				updateActions = append(updateActions, instancecontrol.NewUpdateAction(updatedInstance))
@@ -155,4 +146,14 @@ func (c *statefulControl) GetActions(
 	}
 
 	return actions, nil
+}
+
+func addInstanceControllerLabels(instance *v1alpha.Instance, index int, deployment *v1alpha.WorkloadDeployment) {
+	if instance.Labels == nil {
+		instance.Labels = map[string]string{}
+	}
+
+	instance.Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(index)
+	instance.Labels[v1alpha.WorkloadUIDLabel] = string(deployment.Spec.WorkloadRef.UID)
+	instance.Labels[v1alpha.WorkloadDeploymentUIDLabel] = string(deployment.GetUID())
 }

@@ -23,13 +23,13 @@ type Strategy interface {
 	) ([]Action, error)
 }
 
-type ActionType int
+type ActionType string
 
 const (
-	ActionTypeCreate ActionType = iota
-	ActionTypeUpdate
-	ActionTypeDelete
-	ActionTypeWait
+	ActionTypeCreate ActionType = "Create"
+	ActionTypeUpdate ActionType = "Update"
+	ActionTypeDelete ActionType = "Delete"
+	ActionTypeWait   ActionType = "Wait"
 )
 
 type Action struct {

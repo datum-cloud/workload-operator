@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,6 +20,8 @@ import (
 
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	computev1alpha "go.datum.net/workload-operator/api/v1alpha"
+
+	instancecontrolstateful "go.datum.net/workload-operator/internal/controller/instancecontrol/stateful"
 )
 
 // WorkloadDeploymentReconciler reconciles a WorkloadDeployment object
@@ -62,9 +65,7 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 		return ctrl.Result{}, nil
 	}
 
-	// TODO(jreese) shortcut work on a status condition for network bindings
-	// being ready
-
+	allNetworkBindingsReady := true
 	for i, networkInterface := range deployment.Spec.Template.Spec.NetworkInterfaces {
 		var networkBinding networkingv1alpha.NetworkBinding
 		networkBindingObjectKey := client.ObjectKey{
@@ -97,6 +98,46 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 			}
 		}
 
+		if !apimeta.IsStatusConditionTrue(networkBinding.Status.Conditions, networkingv1alpha.NetworkBindingReady) {
+			allNetworkBindingsReady = false
+		}
+	}
+
+	if !allNetworkBindingsReady {
+		logger.Info("waiting for network bindings to be ready")
+		return ctrl.Result{}, nil
+	}
+
+	// Collect all instances for this deployment
+	listOpts := client.MatchingLabels{
+		computev1alpha.WorkloadDeploymentUIDLabel: string(deployment.GetUID()),
+	}
+
+	var instances computev1alpha.InstanceList
+	if err := cl.GetClient().List(ctx, &instances, listOpts); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed listing instances: %w", err)
+	}
+
+	instanceControl := instancecontrolstateful.New()
+
+	actions, err := instanceControl.GetActions(ctx, cl.GetScheme(), &deployment, instances.Items)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed getting instance control actions: %w", err)
+	}
+
+	logger.Info("collected instance control actions", "count", len(actions))
+
+	for _, action := range actions {
+		// We don't need to actually check this, but it'll reduce log noise.
+		if action.IsSkipped() {
+			continue
+		}
+
+		logger.Info("instance control action", "instance", action.Object.GetName(), "action", action.ActionType())
+
+		if err := action.Execute(ctx, cl.GetClient()); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed executing instance control action: %w", err)
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -108,5 +149,7 @@ func (r *WorkloadDeploymentReconciler) SetupWithManager(mgr mcmanager.Manager) e
 	// TODO(jreese) finalizers
 	return mcbuilder.ControllerManagedBy(mgr).
 		For(&computev1alpha.WorkloadDeployment{}, mcbuilder.WithEngageWithLocalCluster(false)).
+		Owns(&computev1alpha.Instance{}).
+		Owns(&networkingv1alpha.NetworkBinding{}).
 		Complete(r)
 }
