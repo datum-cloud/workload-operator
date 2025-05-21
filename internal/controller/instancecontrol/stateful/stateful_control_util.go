@@ -30,7 +30,7 @@ func getInstanceOrdinal(name string) int {
 }
 
 func ascendingOrdinal(a, b instancecontrol.Action) int {
-	if getInstanceOrdinal(a.ObjectName) < getInstanceOrdinal(b.ObjectName) {
+	if getInstanceOrdinal(a.Object.GetName()) < getInstanceOrdinal(b.Object.GetName()) {
 		return -1
 	} else {
 		return 1
@@ -38,7 +38,7 @@ func ascendingOrdinal(a, b instancecontrol.Action) int {
 }
 
 func descendingOrdinal(a, b instancecontrol.Action) int {
-	if getInstanceOrdinal(a.ObjectName) > getInstanceOrdinal(b.ObjectName) {
+	if getInstanceOrdinal(a.Object.GetName()) > getInstanceOrdinal(b.Object.GetName()) {
 		return -1
 	} else {
 		return 1

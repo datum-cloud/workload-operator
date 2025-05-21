@@ -2,6 +2,7 @@ package instancecontrol
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +33,7 @@ const (
 )
 
 type Action struct {
-	ObjectName    string
+	Object        client.Object
 	actionType    ActionType
 	skipExecution bool
 	fn            func(ctx context.Context, c client.Client) error
@@ -58,33 +59,47 @@ func (a Action) ActionType() ActionType {
 	return a.actionType
 }
 
-func NewCreateAction(objectName string, f func(ctx context.Context, c client.Client) error) Action {
+func NewCreateAction(object client.Object) Action {
 	return Action{
-		ObjectName: objectName,
+		Object:     object,
 		actionType: ActionTypeCreate,
-		fn:         f,
+		fn: func(ctx context.Context, c client.Client) error {
+			if err := c.Create(ctx, object); err != nil {
+				return fmt.Errorf("failed to create %T: %w", object, err)
+			}
+
+			return nil
+		},
 	}
 }
 
-func NewUpdateAction(objectName string, f func(ctx context.Context, c client.Client) error) Action {
+func NewUpdateAction(object client.Object) Action {
 	return Action{
-		ObjectName: objectName,
+		Object:     object,
 		actionType: ActionTypeUpdate,
-		fn:         f,
+		fn: func(ctx context.Context, c client.Client) error {
+			if err := c.Update(ctx, object); err != nil {
+				return fmt.Errorf("failed to update %T: %w", object, err)
+			}
+
+			return nil
+		},
 	}
 }
 
-func NewDeleteAction(objectName string, f func(ctx context.Context, c client.Client) error) Action {
+func NewDeleteAction(object client.Object) Action {
 	return Action{
-		ObjectName: objectName,
+		Object:     object,
 		actionType: ActionTypeDelete,
-		fn:         f,
+		fn: func(ctx context.Context, c client.Client) error {
+			return c.Delete(ctx, object)
+		},
 	}
 }
 
-func NewWaitAction(objectName string) Action {
+func NewWaitAction(object client.Object) Action {
 	return Action{
-		ObjectName: objectName,
+		Object:     object,
 		actionType: ActionTypeWait,
 		fn:         func(ctx context.Context, c client.Client) error { return nil },
 	}

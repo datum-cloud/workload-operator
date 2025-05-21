@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/utils/ptr"
 
 	"go.datum.net/workload-operator/api/v1alpha"
 	"go.datum.net/workload-operator/internal/controller/instancecontrol"
@@ -37,11 +38,11 @@ func TestFreshDeployment(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, actions, 2)
 
-	assert.Equal(t, "test-fresh-deploy-0", actions[0].ObjectName)
+	assert.Equal(t, "test-fresh-deploy-0", actions[0].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[0].ActionType())
 	assert.False(t, actions[0].IsSkipped())
 
-	assert.Equal(t, "test-fresh-deploy-1", actions[1].ObjectName)
+	assert.Equal(t, "test-fresh-deploy-1", actions[1].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[1].ActionType())
 	assert.True(t, actions[1].IsSkipped())
 }
@@ -63,11 +64,11 @@ func TestUpdateWithAllReadyInstances(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, actions, 2)
 
-	assert.Equal(t, "test-deploy-1", actions[0].ObjectName)
+	assert.Equal(t, "test-deploy-1", actions[0].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeUpdate, actions[0].ActionType())
 	assert.False(t, actions[0].IsSkipped())
 
-	assert.Equal(t, "test-deploy-0", actions[1].ObjectName)
+	assert.Equal(t, "test-deploy-0", actions[1].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeUpdate, actions[1].ActionType())
 	assert.True(t, actions[1].IsSkipped())
 }
@@ -93,11 +94,38 @@ func TestScaleUpWithNotReadyInstance(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, actions, 2)
 
-	assert.Equal(t, "test-deploy-1", actions[0].ObjectName)
+	assert.Equal(t, "test-deploy-1", actions[0].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeWait, actions[0].ActionType())
 	assert.False(t, actions[0].IsSkipped())
 
-	assert.Equal(t, "test-deploy-2", actions[1].ObjectName)
+	assert.Equal(t, "test-deploy-2", actions[1].Object.GetName())
+	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[1].ActionType())
+	assert.True(t, actions[1].IsSkipped())
+}
+
+func TestScaleUpWithDeletingReadyInstance(t *testing.T) {
+	ctx := context.Background()
+	control := NewStatefulControl()
+
+	deployment := getWorkloadDeployment("test-deploy", 3)
+
+	var currentInstances []v1alpha.Instance
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
+
+	deletingInstance := getInstanceForDeployment(deployment, 1)
+	deletingInstance.DeletionTimestamp = ptr.To(metav1.Now())
+	currentInstances = append(currentInstances, *deletingInstance)
+
+	actions, err := control.GetActions(ctx, scheme, deployment, currentInstances)
+
+	assert.NoError(t, err)
+	assert.Len(t, actions, 2)
+
+	assert.Equal(t, "test-deploy-1", actions[0].Object.GetName())
+	assert.Equal(t, instancecontrol.ActionTypeWait, actions[0].ActionType())
+	assert.False(t, actions[0].IsSkipped())
+
+	assert.Equal(t, "test-deploy-2", actions[1].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeCreate, actions[1].ActionType())
 	assert.True(t, actions[1].IsSkipped())
 }
@@ -117,7 +145,7 @@ func TestScaleDownWithAllReadyInstances(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, actions, 1)
 
-	assert.Equal(t, "test-deploy-1", actions[0].ObjectName)
+	assert.Equal(t, "test-deploy-1", actions[0].Object.GetName())
 	assert.Equal(t, instancecontrol.ActionTypeDelete, actions[0].ActionType())
 	assert.False(t, actions[0].IsSkipped())
 }

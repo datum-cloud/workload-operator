@@ -9,7 +9,6 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"go.datum.net/workload-operator/api/v1alpha"
@@ -50,12 +49,7 @@ func (c *statefulControl) GetActions(
 	for _, instance := range currentInstances {
 		instanceIndex := getInstanceOrdinal(instance.Name)
 		if instanceIndex >= len(desiredInstances) {
-			deleteActions = append(deleteActions, instancecontrol.NewDeleteAction(
-				instance.Name,
-				func(ctx context.Context, c client.Client) error {
-					return c.Delete(ctx, &instance)
-				},
-			))
+			deleteActions = append(deleteActions, instancecontrol.NewDeleteAction(&instance))
 		} else {
 			desiredInstances[instanceIndex] = &instance
 		}
@@ -100,54 +94,32 @@ func (c *statefulControl) GetActions(
 
 	for _, instance := range desiredInstances {
 		if instance.CreationTimestamp.IsZero() {
-			action := instancecontrol.NewCreateAction(
-				instance.Name,
-				func(ctx context.Context, c client.Client) error {
-					if err := c.Create(ctx, instance); err != nil {
-						return fmt.Errorf("failed to create instance: %w", err)
-					}
-
-					return nil
-				},
-			)
+			action := instancecontrol.NewCreateAction(instance)
 
 			createActions = append(createActions, action)
 		} else if !instance.DeletionTimestamp.IsZero() {
 			// Wait for graceful deletion before continuing processing additional
 			// instances.
-			waitActions = append(waitActions, instancecontrol.NewWaitAction(
-				instance.Name,
-			))
+			waitActions = append(waitActions, instancecontrol.NewWaitAction(instance))
 
 		} else if instance.DeletionTimestamp.IsZero() {
 			// Wait for the instance to be ready before continuing processing
 			if !apimeta.IsStatusConditionTrue(instance.Status.Conditions, v1alpha.InstanceReady) {
-				waitActions = append(waitActions, instancecontrol.NewWaitAction(
-					instance.Name,
-				))
+				waitActions = append(waitActions, instancecontrol.NewWaitAction(instance))
 			} else if needsUpdate(instance, instanceTemplateHash) {
-				updateActions = append(updateActions, instancecontrol.NewUpdateAction(
-					instance.Name,
-					func(ctx context.Context, c client.Client) error {
-						instance.Annotations = deployment.Spec.Template.Annotations
-						instance.Labels = deployment.Spec.Template.Labels
+				updatedInstance := instance.DeepCopy()
+				updatedInstance.Annotations = deployment.Spec.Template.Annotations
+				updatedInstance.Labels = deployment.Spec.Template.Labels
 
-						if instance.Labels == nil {
-							instance.Labels = map[string]string{}
-						}
+				if updatedInstance.Labels == nil {
+					updatedInstance.Labels = map[string]string{}
+				}
 
-						// Shouldn't get removed, but just in case.
-						instance.Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(getInstanceOrdinal(instance.Name))
+				// Shouldn't get removed, but just in case.
+				updatedInstance.Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(getInstanceOrdinal(instance.Name))
 
-						instance.Spec = deployment.Spec.Template.Spec
-
-						if err := c.Update(ctx, instance); err != nil {
-							return fmt.Errorf("failed to update instance: %w", err)
-						}
-
-						return nil
-					},
-				))
+				updatedInstance.Spec = deployment.Spec.Template.Spec
+				updateActions = append(updateActions, instancecontrol.NewUpdateAction(updatedInstance))
 			}
 		}
 	}
