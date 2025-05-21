@@ -68,6 +68,12 @@ spec:
                       description: Scale settings such as minimum and maximum replica
                         counts.
                       properties:
+                        instanceManagementPolicy:
+                          default: OrderedReady
+                          description: |-
+                            Controls how instances are managed during scale up and down, as well as
+                            during maintenance events.
+                          type: string
                         maxReplicas:
                           description: The maximum number of replicas.
                           format: int32
@@ -122,6 +128,7 @@ spec:
                           format: int32
                           type: integer
                       required:
+                      - instanceManagementPolicy
                       - minReplicas
                       type: object
                   required:

@@ -165,7 +165,22 @@ type HorizontalScaleSettings struct {
 
 	// TODO(jreese) wire in behavior
 	// See https://github.com/kubernetes/kubernetes/blob/dd87bc064631354885193fc1a97d0e7b603e77b4/staging/src/k8s.io/api/autoscaling/v2/types.go#L84
+	// Defines the policy for managing instances.
+
+	// Controls how instances are managed during scale up and down, as well as
+	// during maintenance events.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default=OrderedReady
+	InstanceManagementPolicy InstanceManagementPolicyType `json:"instanceManagementPolicy,omitempty"`
 }
+
+type InstanceManagementPolicyType string
+
+const (
+	OrderedReadyInstanceManagementPolicyType InstanceManagementPolicyType = "OrderedReady"
+	// ParallelInstanceManagementPolicyType     InstanceManagementPolicyType = "Parallel"
+)
 
 type MetricSpec struct {
 	// Resource metrics known to Datum.

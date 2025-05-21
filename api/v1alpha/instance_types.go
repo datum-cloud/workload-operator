@@ -339,6 +339,11 @@ type InstanceStatus struct {
 	NetworkInterfaces []InstanceNetworkInterfaceStatus `json:"networkInterfaces,omitempty"`
 }
 
+const (
+	// InstanceReady indicates that the instance is ready
+	InstanceReady = "Ready"
+)
+
 type InstanceTemplateSpec struct {
 	// Metadata of the instances created from this template
 	//
