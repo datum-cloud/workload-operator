@@ -49,11 +49,12 @@ func TestUpdateWithAllReadyInstances(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	var currentInstances []v1alpha.Instance
-	currentInstances = append(currentInstances, *getInstance("test-deploy", "default", 0))
-	currentInstances = append(currentInstances, *getInstance("test-deploy", "default", 1))
-
 	deployment := getWorkloadDeployment("test-deploy", "default", 2)
+
+	var currentInstances []v1alpha.Instance
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 1))
+
 	deployment.Spec.Template.Spec.Runtime.Sandbox.Containers[0].Image = "test-image-update"
 
 	actions, err := control.GetActions(ctx, scheme, deployment, currentInstances)
@@ -74,17 +75,17 @@ func TestScaleUpWithNotReadyInstance(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	var currentInstances []v1alpha.Instance
-	currentInstances = append(currentInstances, *getInstance("test-deploy", "default", 0))
+	deployment := getWorkloadDeployment("test-deploy", "default", 3)
 
-	notReadyInstance := getInstance("test-deploy", "default", 1)
+	var currentInstances []v1alpha.Instance
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
+
+	notReadyInstance := getInstanceForDeployment(deployment, 1)
 	apimeta.SetStatusCondition(&notReadyInstance.Status.Conditions, metav1.Condition{
 		Type:   v1alpha.InstanceReady,
 		Status: metav1.ConditionFalse,
 	})
 	currentInstances = append(currentInstances, *notReadyInstance)
-
-	deployment := getWorkloadDeployment("test-deploy", "default", 3)
 
 	actions, err := control.GetActions(ctx, scheme, deployment, currentInstances)
 
@@ -104,11 +105,11 @@ func TestScaleDownWithAllReadyInstances(t *testing.T) {
 	ctx := context.Background()
 	control := NewStatefulControl()
 
-	var currentInstances []v1alpha.Instance
-	currentInstances = append(currentInstances, *getInstance("test-deploy", "default", 0))
-	currentInstances = append(currentInstances, *getInstance("test-deploy", "default", 1))
-
 	deployment := getWorkloadDeployment("test-deploy", "default", 1)
+
+	var currentInstances []v1alpha.Instance
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 0))
+	currentInstances = append(currentInstances, *getInstanceForDeployment(deployment, 1))
 
 	actions, err := control.GetActions(ctx, scheme, deployment, currentInstances)
 
@@ -123,8 +124,7 @@ func TestScaleDownWithAllReadyInstances(t *testing.T) {
 // Add more test functions below for different scenarios.
 
 func getWorkloadDeployment(name, namespace string, minReplicas int32) *v1alpha.WorkloadDeployment {
-	instance := getInstance(name, namespace, 0)
-	instance.Labels = nil
+	instance := getInstanceTemplate(name, namespace, 0)
 	deployment := &v1alpha.WorkloadDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -145,16 +145,43 @@ func getWorkloadDeployment(name, namespace string, minReplicas int32) *v1alpha.W
 	return deployment
 }
 
+func getInstanceForDeployment(deployment *v1alpha.WorkloadDeployment, ordinal int) *v1alpha.Instance {
+	instance := getInstance(deployment.Name, deployment.Namespace, ordinal)
+	instance.Spec.Controller = &v1alpha.InstanceController{
+		TemplateHash: instancecontrol.ComputeHash(deployment.Spec.Template),
+	}
+
+	return instance
+}
+
 func getInstance(name, namespace string, ordinal int) *v1alpha.Instance {
+	instance := getInstanceTemplate(name, namespace, ordinal)
+	instance.CreationTimestamp = metav1.Now()
+	instance.Labels = map[string]string{
+		v1alpha.InstanceIndexLabel: strconv.Itoa(ordinal),
+	}
+
+	instance.Status = v1alpha.InstanceStatus{
+		Conditions: []metav1.Condition{
+			{
+				Type:               v1alpha.InstanceReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             "Ready",
+				Message:            "Instance is ready",
+				LastTransitionTime: metav1.Now(),
+			},
+		},
+	}
+
+	return instance
+}
+
+func getInstanceTemplate(name, namespace string, ordinal int) *v1alpha.Instance {
 	instanceName := fmt.Sprintf("%s-%d", name, ordinal)
 	instance := &v1alpha.Instance{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              instanceName,
-			Namespace:         namespace,
-			CreationTimestamp: metav1.Now(),
-			Labels: map[string]string{
-				v1alpha.InstanceIndexLabel: strconv.Itoa(ordinal),
-			},
+			Name:      instanceName,
+			Namespace: namespace,
 		},
 		Spec: v1alpha.InstanceSpec{
 			Runtime: v1alpha.InstanceRuntimeSpec{
@@ -168,14 +195,6 @@ func getInstance(name, namespace string, ordinal int) *v1alpha.Instance {
 							Image: "test",
 						},
 					},
-				},
-			},
-		},
-		Status: v1alpha.InstanceStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:   v1alpha.InstanceReady,
-					Status: metav1.ConditionTrue,
 				},
 			},
 		},

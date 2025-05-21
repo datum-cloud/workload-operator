@@ -4,22 +4,13 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/equality"
-
 	"go.datum.net/workload-operator/api/v1alpha"
 	"go.datum.net/workload-operator/internal/controller/instancecontrol"
 )
 
-func needsUpdate(instance *v1alpha.Instance, deployment *v1alpha.WorkloadDeployment) bool {
-	labels := instance.Labels
-	if labels != nil {
-		instance = instance.DeepCopy()
-		delete(instance.Labels, v1alpha.InstanceIndexLabel)
-	}
-
-	return !equality.Semantic.DeepEqual(instance.Annotations, deployment.Spec.Template.Annotations) ||
-		!equality.Semantic.DeepEqual(instance.Labels, deployment.Spec.Template.Labels) ||
-		!equality.Semantic.DeepEqual(instance.Spec, deployment.Spec.Template.Spec)
+func needsUpdate(instance *v1alpha.Instance, instanceTemplateHash string) bool {
+	return instance.Spec.Controller == nil ||
+		instance.Spec.Controller.TemplateHash != instanceTemplateHash
 }
 
 // getInstanceOrdinal returns the ordinal of the instance, or -1 if the instance

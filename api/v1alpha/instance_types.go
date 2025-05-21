@@ -26,8 +26,37 @@ type InstanceSpec struct {
 	// +kubebuilder:validation:Optional
 	// +listType=map
 	// +listMapKey=name
-
 	Volumes []InstanceVolume `json:"volumes,omitempty"`
+
+	// The location which the instance has been scheduled to
+	//
+	// +kubebuilder:validation:Optional
+	Location *networkingv1alpha.LocationReference `json:"location,omitempty"`
+
+	// Controller contains settings driven by the controller managing the instance.
+	//
+	// +kubebuilder:validation:Optional
+	Controller *InstanceController `json:"controller,omitempty"`
+}
+
+type InstanceController struct {
+	// TemplateHash is the hash of the instance template applied for this instance.
+	//
+	// +kubebuilder:validation:Required
+	TemplateHash string `json:"templateHash"`
+
+	// SchedulingGates is a list of gates that must be satisfied before the
+	// instance can be scheduled.
+	//
+	// +kubebuilder:validation:Optional
+	// +listType=map
+	// +listMapKey=name
+	SchedulingGates []SchedulingGate `json:"schedulingGates,omitempty"`
+}
+
+type SchedulingGate struct {
+	// The name of the gate.
+	Name string `json:"name"`
 }
 
 type InstanceRuntimeSpec struct {
@@ -337,6 +366,18 @@ type InstanceStatus struct {
 
 	// Network interface information
 	NetworkInterfaces []InstanceNetworkInterfaceStatus `json:"networkInterfaces,omitempty"`
+
+	// Controller contains status information about the controller managing the instance.
+	//
+	// +kubebuilder:validation:Optional
+	Controller *InstanceControllerStatus `json:"controller,omitempty"`
+}
+
+type InstanceControllerStatus struct {
+	// ObservedTemplateHash is the hash of the instance template applied for this instance.
+	//
+	// +kubebuilder:validation:Required
+	ObservedTemplateHash string `json:"observedTemplateHash"`
 }
 
 const (
@@ -368,7 +409,12 @@ type Instance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   InstanceSpec   `json:"spec,omitempty"`
+	// Spec defines the desired state of an Instance.
+	Spec InstanceSpec `json:"spec,omitempty"`
+
+	// Status defines the current state of an Instance.
+	//
+	// +kubebuilder:default={conditions:{{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
 	Status InstanceStatus `json:"status,omitempty"`
 }
 

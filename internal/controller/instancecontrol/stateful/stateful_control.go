@@ -31,6 +31,8 @@ func (c *statefulControl) GetActions(
 	deployment *v1alpha.WorkloadDeployment,
 	currentInstances []v1alpha.Instance,
 ) ([]instancecontrol.Action, error) {
+	instanceTemplateHash := instancecontrol.ComputeHash(deployment.Spec.Template)
+
 	// lowest -> highest
 	var createActions []instancecontrol.Action
 	var waitActions []instancecontrol.Action
@@ -72,6 +74,17 @@ func (c *statefulControl) GetActions(
 				},
 				Spec: deployment.Spec.Template.Spec,
 			}
+			desiredInstances[i].Spec.Location = deployment.Status.Location
+
+			// TODO(jreese) consider adding scheduling gates via mutating webhooks
+			desiredInstances[i].Spec.Controller = &v1alpha.InstanceController{
+				TemplateHash: instanceTemplateHash,
+				SchedulingGates: []v1alpha.SchedulingGate{
+					{
+						Name: instancecontrol.NetworkSchedulingGate.String(),
+					},
+				},
+			}
 
 			if desiredInstances[i].Labels == nil {
 				desiredInstances[i].Labels = map[string]string{}
@@ -112,12 +125,20 @@ func (c *statefulControl) GetActions(
 				waitActions = append(waitActions, instancecontrol.NewWaitAction(
 					instance.Name,
 				))
-			} else if needsUpdate(instance, deployment) {
+			} else if needsUpdate(instance, instanceTemplateHash) {
 				updateActions = append(updateActions, instancecontrol.NewUpdateAction(
 					instance.Name,
 					func(ctx context.Context, c client.Client) error {
 						instance.Annotations = deployment.Spec.Template.Annotations
 						instance.Labels = deployment.Spec.Template.Labels
+
+						if instance.Labels == nil {
+							instance.Labels = map[string]string{}
+						}
+
+						// Shouldn't get removed, but just in case.
+						instance.Labels[v1alpha.InstanceIndexLabel] = strconv.Itoa(getInstanceOrdinal(instance.Name))
+
 						instance.Spec = deployment.Spec.Template.Spec
 
 						if err := c.Update(ctx, instance); err != nil {
