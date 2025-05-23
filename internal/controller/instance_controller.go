@@ -5,12 +5,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
@@ -53,42 +53,28 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 	logger.Info("reconciling instance")
 	defer logger.Info("reconcile complete")
 
-	// Ensure the instance has labels necessary for being able to identify
-	// instances associated with a specific workload or workload deployment via
-	// label selectors.
-	//
-	// This logic will not be necessary once we complete the work defined in
-	// https://github.com/datum-cloud/enhancements/issues/28
+	if len(instance.Spec.Controller.SchedulingGates) > 0 {
+		// Update Ready condition to False, Reason to "SchedulingGatesPresent"
+		// and Message to "Scheduling gates present"
 
-	workloadDeploymentRef := metav1.GetControllerOf(&instance)
-	if workloadDeploymentRef == nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get controller owner of Instance")
-	}
+		// Collect a list of scheduling gate names
+		var schedulingGateNames []string
+		for _, gate := range instance.Spec.Controller.SchedulingGates {
+			schedulingGateNames = append(schedulingGateNames, gate.Name)
+		}
 
-	var workloadDeployment computev1alpha.WorkloadDeployment
-	workloadDeploymentObjectKey := client.ObjectKey{
-		Namespace: instance.Namespace,
-		Name:      workloadDeploymentRef.Name,
-	}
-	if err := cl.GetClient().Get(ctx, workloadDeploymentObjectKey, &workloadDeployment); err != nil {
-		return ctrl.Result{}, err
-	}
+		changed := apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+			Type:               computev1alpha.InstanceReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             computev1alpha.InstanceReadyReasonSchedulingGatesPresent,
+			Message:            fmt.Sprintf("Scheduling gates present: %s", strings.Join(schedulingGateNames, ", ")),
+			ObservedGeneration: instance.Generation,
+		})
 
-	workloadRef := metav1.GetControllerOf(&workloadDeployment)
-	if workloadRef == nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get controller owner of WorkloadDeployment")
-	}
-
-	updated := instance.DeepCopy()
-	if updated.Labels == nil {
-		updated.Labels = map[string]string{}
-	}
-	updated.Labels[computev1alpha.WorkloadUIDLabel] = string(workloadRef.UID)
-	updated.Labels[computev1alpha.WorkloadDeploymentUIDLabel] = string(workloadDeploymentRef.UID)
-
-	if !equality.Semantic.DeepEqual(updated, instance) {
-		if err := cl.GetClient().Update(ctx, updated); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed updating instance: %w", err)
+		if changed {
+			if err := cl.GetClient().Status().Update(ctx, &instance); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed updating instance status: %w", err)
+			}
 		}
 	}
 

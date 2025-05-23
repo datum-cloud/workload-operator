@@ -385,6 +385,11 @@ const (
 	InstanceReady = "Ready"
 )
 
+const (
+	// InstanceReadyReasonSchedulingGatesPresent indicates that the instance is not ready because scheduling gates are present.
+	InstanceReadyReasonSchedulingGatesPresent = "SchedulingGatesPresent"
+)
+
 type InstanceTemplateSpec struct {
 	// Metadata of the instances created from this template
 	//
@@ -401,8 +406,8 @@ type InstanceTemplateSpec struct {
 
 // Instance is the Schema for the instances API
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
-// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].reason`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 // +kubebuilder:printcolumn:name="Network IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.networkIP`,priority=1
 // +kubebuilder:printcolumn:name="External IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.externalIP`,priority=1
 type Instance struct {
@@ -414,7 +419,7 @@ type Instance struct {
 
 	// Status defines the current state of an Instance.
 	//
-	// +kubebuilder:default={conditions:{{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
+	// +kubebuilder:default={conditions:{{type:"Running",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
 	Status InstanceStatus `json:"status,omitempty"`
 }
 
