@@ -12,13 +12,17 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/finalizer"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
@@ -29,7 +33,6 @@ import (
 )
 
 const workloadControllerFinalizer = "compute.datumapis.com/workload-controller"
-const deploymentWorkloadUID = "spec.workloadRef.uid"
 
 // WorkloadReconciler reconciles a Workload object
 type WorkloadReconciler struct {
@@ -296,7 +299,7 @@ func (r *WorkloadReconciler) reconcileWorkloadStatus(
 
 	workload.Status = *newWorkloadStatus
 	if err := upstreamClient.Status().Update(ctx, workload); err != nil {
-		return fmt.Errorf("failed updating workload status")
+		return fmt.Errorf("failed updating workload status: %w", err)
 	}
 
 	return nil
@@ -317,7 +320,7 @@ func (r *WorkloadReconciler) Finalize(ctx context.Context, obj client.Object) (f
 	}
 
 	listOpts := client.MatchingFields{
-		deploymentWorkloadUID: string(obj.GetUID()),
+		deploymentWorkloadUIDIndex: string(obj.GetUID()),
 	}
 	var deployments computev1alpha.WorkloadDeploymentList
 	if err := cl.GetClient().List(ctx, &deployments, listOpts); err != nil {
@@ -368,7 +371,7 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 ) (desired []computev1alpha.WorkloadDeployment, orphaned []computev1alpha.WorkloadDeployment, err error) {
 
 	listOpts := client.MatchingFields{
-		deploymentWorkloadUID: string(workload.UID),
+		deploymentWorkloadUIDIndex: string(workload.UID),
 	}
 	var deployments computev1alpha.WorkloadDeploymentList
 	if err := upstreamClient.List(ctx, &deployments, listOpts); err != nil {
@@ -462,22 +465,46 @@ func (r *WorkloadReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 		return fmt.Errorf("failed to register finalizer: %w", err)
 	}
 
-	// TODO(jreese) move to indexer package
-
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &computev1alpha.WorkloadDeployment{}, deploymentWorkloadUID, func(o client.Object) []string {
-		return []string{
-			string(o.(*computev1alpha.WorkloadDeployment).Spec.WorkloadRef.UID),
-		}
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add workload deployment field indexer: %w", err)
-	}
-
-	// TODO(jreese) add watch against networks that triggers a reconcile for
-	// workloads that are attached and are in an error state for networks not
-	// existing.
 	return mcbuilder.ControllerManagedBy(mgr).
 		For(&computev1alpha.Workload{}, mcbuilder.WithEngageWithLocalCluster(false)).
 		Owns(&computev1alpha.WorkloadDeployment{}, mcbuilder.WithEngageWithLocalCluster(false)).
+		Watches(&networkingv1alpha.Network{}, func(clusterName string, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+			return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, network client.Object) []mcreconcile.Request {
+				logger := log.FromContext(ctx)
+
+				cluster, err := mgr.GetCluster(ctx, clusterName)
+				if err != nil {
+					logger.Error(err, "failed to get cluster")
+					return nil
+				}
+				clusterClient := cluster.GetClient()
+
+				networkName := client.ObjectKeyFromObject(network).String()
+				listOpts := client.MatchingFields{
+					workloadNetworksIndex: networkName,
+				}
+
+				var workloads computev1alpha.WorkloadList
+				if err := clusterClient.List(ctx, &workloads, listOpts); err != nil {
+					logger.Error(err, "failed to list workloads")
+					return nil
+				}
+
+				var requests []mcreconcile.Request
+				for _, workload := range workloads.Items {
+					requests = append(requests, mcreconcile.Request{
+						Request: reconcile.Request{
+							NamespacedName: types.NamespacedName{
+								Namespace: workload.Namespace,
+								Name:      workload.Name,
+							},
+						},
+						ClusterName: clusterName,
+					})
+				}
+
+				return requests
+			})
+		}).
 		Complete(r)
 }

@@ -5,4 +5,6 @@ const (
 
 	WorkloadUIDLabel           = LabelNamespace + "/workload-uid"
 	WorkloadDeploymentUIDLabel = LabelNamespace + "/workload-deployment-uid"
+
+	InstanceIndexLabel = LabelNamespace + "/instance-index"
 )
