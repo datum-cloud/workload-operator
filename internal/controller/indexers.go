@@ -15,6 +15,7 @@ import (
 const (
 	deploymentWorkloadUIDIndex = "deploymentWorkloadUIDIndex"
 	workloadNetworksIndex      = "workloadNetworksIndex"
+	deploymentLocationIndex    = "deploymentLocationIndex"
 )
 
 func AddIndexers(ctx context.Context, mgr mcmanager.Manager) error {
@@ -29,12 +30,31 @@ func addWorkloadDeploymentIndexers(ctx context.Context, mgr mcmanager.Manager) e
 		return fmt.Errorf("failed to add workload deployment indexer %q: %w", deploymentWorkloadUIDIndex, err)
 	}
 
+	// Index workload deployments by location
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &computev1alpha.WorkloadDeployment{}, deploymentLocationIndex, deploymentLocationIndexFunc); err != nil {
+		return fmt.Errorf("failed to add workload deployment indexer %q: %w", deploymentLocationIndex, err)
+	}
+
 	return nil
 }
 
 func deploymentWorkloadUIDIndexFunc(o client.Object) []string {
 	return []string{
 		string(o.(*computev1alpha.WorkloadDeployment).Spec.WorkloadRef.UID),
+	}
+}
+
+func deploymentLocationIndexFunc(o client.Object) []string {
+	deployment := o.(*computev1alpha.WorkloadDeployment)
+	if deployment.Status.Location == nil {
+		return nil
+	}
+
+	return []string{
+		types.NamespacedName{
+			Namespace: deployment.Status.Location.Namespace,
+			Name:      deployment.Status.Location.Name,
+		}.String(),
 	}
 }
 

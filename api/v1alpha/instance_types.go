@@ -383,11 +383,23 @@ type InstanceControllerStatus struct {
 const (
 	// InstanceReady indicates that the instance is ready
 	InstanceReady = "Ready"
+
+	// InstanceProgrammed indicates that the instance has been programmed
+	InstanceProgrammed = "Programmed"
 )
 
 const (
 	// InstanceReadyReasonSchedulingGatesPresent indicates that the instance is not ready because scheduling gates are present.
 	InstanceReadyReasonSchedulingGatesPresent = "SchedulingGatesPresent"
+
+	// InstanceProgrammedReasonNotProgrammed indicates that the instance has not been programmed
+	InstanceProgrammedReasonNotProgrammed = "NotProgrammed"
+
+	// InstanceProgrammedReasonProgrammingInProgress indicates that the instance is being programmed.
+	InstanceProgrammedReasonProgrammingInProgress = "ProgrammingInProgress"
+
+	// InstanceProgrammedReasonProgrammed indicates that the instance has been programmed
+	InstanceProgrammedReasonProgrammed = "Programmed"
 )
 
 type InstanceTemplateSpec struct {
@@ -419,7 +431,7 @@ type Instance struct {
 
 	// Status defines the current state of an Instance.
 	//
-	// +kubebuilder:default={conditions:{{type:"Running",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
+	// +kubebuilder:default={conditions:{{type:"Programmed",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Running",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
 	Status InstanceStatus `json:"status,omitempty"`
 }
 

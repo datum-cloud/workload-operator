@@ -10,10 +10,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
@@ -110,6 +114,7 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 	// gates on instances. If any instances were created by actions above, those
 	// will result in this reconciler being processed again, so will properly have
 	// their gates removed.
+	logger.Info("removing scheduling gates from instances")
 
 	for _, instance := range instances.Items {
 		if len(instance.Spec.Controller.SchedulingGates) == 0 {
@@ -125,10 +130,10 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 			continue
 		}
 
-		instance.Spec.Controller.SchedulingGates = newGates
-
-		// TODO(jreese) consider using patches
-		if err := cl.GetClient().Update(ctx, &instance); err != nil {
+		if _, err := controllerutil.CreateOrPatch(ctx, cl.GetClient(), &instance, func() error {
+			instance.Spec.Controller.SchedulingGates = newGates
+			return nil
+		}); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed updating instance: %w", err)
 		}
 	}
@@ -318,7 +323,7 @@ func (r *WorkloadDeploymentReconciler) reconcileNetworks(
 			return result
 		}
 
-		logger.Info("found subnet", "subnet", subnet.Name)
+		logger.Info("subnet is ready", "subnet", subnet.Name)
 
 	}
 
@@ -329,11 +334,62 @@ func (r *WorkloadDeploymentReconciler) reconcileNetworks(
 func (r *WorkloadDeploymentReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 	r.mgr = mgr
 	// TODO(jreese) finalizers
-	// TODO(jreese) watch subnet claims and subnets, enqueue based on location
-	// match on workload deployment.
 	return mcbuilder.ControllerManagedBy(mgr).
 		For(&computev1alpha.WorkloadDeployment{}, mcbuilder.WithEngageWithLocalCluster(false)).
 		Owns(&computev1alpha.Instance{}).
 		Owns(&networkingv1alpha.NetworkBinding{}).
+		Watches(&networkingv1alpha.SubnetClaim{}, func(clusterName string, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+			return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []mcreconcile.Request {
+				subnetClaim := o.(*networkingv1alpha.SubnetClaim)
+				return enqueueWorkloadDeploymentByLocation(ctx, mgr, clusterName, subnetClaim.Spec.Location)
+			})
+		}).
+		Watches(&networkingv1alpha.Subnet{}, func(clusterName string, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+			return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []mcreconcile.Request {
+				subnet := o.(*networkingv1alpha.Subnet)
+				return enqueueWorkloadDeploymentByLocation(ctx, mgr, clusterName, subnet.Spec.Location)
+			})
+		}).
 		Complete(r)
+}
+
+func enqueueWorkloadDeploymentByLocation(ctx context.Context, mgr mcmanager.Manager, clusterName string, locationRef networkingv1alpha.LocationReference) []mcreconcile.Request {
+	logger := log.FromContext(ctx)
+
+	cluster, err := mgr.GetCluster(ctx, clusterName)
+	if err != nil {
+		logger.Error(err, "failed to get cluster")
+		return nil
+	}
+	clusterClient := cluster.GetClient()
+
+	locationName := (types.NamespacedName{
+		Namespace: locationRef.Namespace,
+		Name:      locationRef.Name,
+	}).String()
+	listOpts := client.MatchingFields{
+		deploymentLocationIndex: locationName,
+	}
+
+	var workloadDeployments computev1alpha.WorkloadDeploymentList
+
+	if err := clusterClient.List(ctx, &workloadDeployments, listOpts); err != nil {
+		logger.Error(err, "failed to list workloads")
+		return nil
+	}
+
+	var requests []mcreconcile.Request
+	for _, workload := range workloadDeployments.Items {
+		requests = append(requests, mcreconcile.Request{
+			Request: reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: workload.Namespace,
+					Name:      workload.Name,
+				},
+			},
+			ClusterName: clusterName,
+		})
+	}
+
+	return requests
 }

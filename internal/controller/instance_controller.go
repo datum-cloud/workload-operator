@@ -11,6 +11,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
@@ -53,6 +54,8 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 	logger.Info("reconciling instance")
 	defer logger.Info("reconcile complete")
 
+	// TODO(jreese) better condition handling
+
 	if len(instance.Spec.Controller.SchedulingGates) > 0 {
 		// Update Ready condition to False, Reason to "SchedulingGatesPresent"
 		// and Message to "Scheduling gates present"
@@ -63,19 +66,58 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 			schedulingGateNames = append(schedulingGateNames, gate.Name)
 		}
 
-		changed := apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+		if _, err := controllerutil.CreateOrPatch(ctx, cl.GetClient(), &instance, func() error {
+			apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             computev1alpha.InstanceReadyReasonSchedulingGatesPresent,
+				Message:            fmt.Sprintf("Scheduling gates present: %s", strings.Join(schedulingGateNames, ", ")),
+				ObservedGeneration: instance.Generation,
+			})
+			return nil
+		}); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed updating instance status: %w", err)
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	if condition := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha.InstanceProgrammed); condition.Status != metav1.ConditionTrue {
+		logger.Info("instance is not programmed", "instance", instance.Name)
+		message := "Instance has not been programmed"
+		if condition.Status != metav1.ConditionUnknown {
+			message = condition.Message
+		}
+
+		logger.Info("updating instance status", "instance", instance.Name)
+		if _, err := controllerutil.CreateOrPatch(ctx, cl.GetClient(), &instance, func() error {
+			apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             computev1alpha.InstanceProgrammedReasonNotProgrammed,
+				Message:            message,
+				ObservedGeneration: instance.Generation,
+			})
+			return nil
+		}); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed updating instance status: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	logger.Info("instance is programmed", "instance", instance.Name)
+
+	if _, err := controllerutil.CreateOrPatch(ctx, cl.GetClient(), &instance, func() error {
+		apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
 			Type:               computev1alpha.InstanceReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             computev1alpha.InstanceReadyReasonSchedulingGatesPresent,
-			Message:            fmt.Sprintf("Scheduling gates present: %s", strings.Join(schedulingGateNames, ", ")),
+			Status:             metav1.ConditionTrue,
+			Reason:             computev1alpha.InstanceProgrammedReasonProgrammed,
+			Message:            "Instance is ready",
 			ObservedGeneration: instance.Generation,
 		})
-
-		if changed {
-			if err := cl.GetClient().Status().Update(ctx, &instance); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed updating instance status: %w", err)
-			}
-		}
+		return nil
+	}); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed updating instance status: %w", err)
 	}
 
 	return ctrl.Result{}, nil
