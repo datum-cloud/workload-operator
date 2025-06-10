@@ -18,17 +18,31 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.location.namespace
-      name: Location Namespce
-      type: string
-    - jsonPath: .status.location.name
-      name: Location Name
-      type: string
     - jsonPath: .status.conditions[?(@.type=="Available")].status
       name: Available
       type: string
     - jsonPath: .status.conditions[?(@.type=="Available")].reason
       name: Reason
+      type: string
+    - jsonPath: .status.replicas
+      name: Replicas
+      type: string
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: string
+    - jsonPath: .status.desiredReplicas
+      name: Desired
+      type: string
+    - jsonPath: .status.currentReplicas
+      name: Up-to-date
+      type: string
+    - jsonPath: .status.location.namespace
+      name: Location Namespace
+      priority: 1
+      type: string
+    - jsonPath: .status.location.name
+      name: Location Name
+      priority: 1
       type: string
     name: v1alpha
     schema:
@@ -66,6 +80,12 @@ spec:
               scaleSettings:
                 description: Scale settings such as minimum and maximum replica counts.
                 properties:
+                  instanceManagementPolicy:
+                    default: OrderedReady
+                    description: |-
+                      Controls how instances are managed during scale up and down, as well as
+                      during maintenance events.
+                    type: string
                   maxReplicas:
                     description: The maximum number of replicas.
                     format: int32
@@ -120,6 +140,7 @@ spec:
                     format: int32
                     type: integer
                 required:
+                - instanceManagementPolicy
                 - minReplicas
                 type: object
               template:
@@ -148,6 +169,47 @@ spec:
                   spec:
                     description: Describes the desired configuration of an instance
                     properties:
+                      controller:
+                        description: Controller contains settings driven by the controller
+                          managing the instance.
+                        properties:
+                          schedulingGates:
+                            description: |-
+                              SchedulingGates is a list of gates that must be satisfied before the
+                              instance can be scheduled.
+                            items:
+                              properties:
+                                name:
+                                  description: The name of the gate.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          templateHash:
+                            description: TemplateHash is the hash of the instance
+                              template applied for this instance.
+                            type: string
+                        required:
+                        - templateHash
+                        type: object
+                      location:
+                        description: The location which the instance has been scheduled
+                          to
+                        properties:
+                          name:
+                            description: Name of a datum location
+                            type: string
+                          namespace:
+                            description: Namespace for the datum location
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
                       networkInterfaces:
                         description: Network interface configuration.
                         items:
@@ -621,6 +683,9 @@ spec:
                         - resources
                         type: object
                       volumes:
+                        description: |-
+                          Volumes that must be available to attach to an instance's containers or
+                          Virtual Machine.
                         items:
                           properties:
                             configMap:
@@ -961,13 +1026,12 @@ spec:
                   type: object
                 type: array
               currentReplicas:
-                description: |-
-                  The number of instances created by a deployment and have the latest
-                  deployment generation settings applied.
+                description: The number of instances which have the latest workload
+                  settings applied.
                 format: int32
                 type: integer
               desiredReplicas:
-                description: The desired number of instances to be managed by a deployment.
+                description: The desired number of instances
                 format: int32
                 type: integer
               location:
@@ -984,13 +1048,18 @@ spec:
                 - name
                 - namespace
                 type: object
+              readyReplicas:
+                description: The number of instances which are ready.
+                format: int32
+                type: integer
               replicas:
-                description: The number of instances created by a deployment
+                description: The number of instances created
                 format: int32
                 type: integer
             required:
             - currentReplicas
             - desiredReplicas
+            - readyReplicas
             - replicas
             type: object
         type: object

@@ -5,11 +5,11 @@ import (
 
 	"fmt"
 
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
@@ -24,8 +24,7 @@ import (
 func SetupWorkloadWebhookWithManager(mgr mcmanager.Manager) error {
 
 	webhook := &workloadWebhook{
-		mgr:    mgr,
-		logger: mgr.GetLogger(),
+		mgr: mgr,
 	}
 
 	return ctrl.NewWebhookManagedBy(mgr.GetLocalManager()).
@@ -38,8 +37,7 @@ func SetupWorkloadWebhookWithManager(mgr mcmanager.Manager) error {
 // +kubebuilder:webhook:path=/mutate-compute-datumapis-com-v1alpha-workload,mutating=true,failurePolicy=fail,sideEffects=None,groups=compute.datumapis.com,resources=workloads,verbs=create;update,versions=v1alpha,name=mworkload.kb.io,admissionReviewVersions=v1
 
 type workloadWebhook struct {
-	mgr    mcmanager.Manager
-	logger logr.Logger
+	mgr mcmanager.Manager
 }
 
 var _ admission.CustomDefaulter = &workloadWebhook{}
@@ -90,6 +88,9 @@ func (r *workloadWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		return nil, err
 	}
 	clusterClient := cluster.GetClient()
+
+	logger := logf.FromContext(ctx).WithValues("cluster", clusterName)
+	logger.Info("Validating Workload Create", "name", workload.GetName(), "cluster", clusterName)
 
 	req, err := admission.RequestFromContext(ctx)
 	if err != nil {

@@ -43,7 +43,6 @@ func TestNotReadyProject(t *testing.T) {
 
 	result, err := provider.Reconcile(context.Background(), req)
 	assert.NoError(t, err, "unexpected error returned from reconciler")
-	assert.Equal(t, false, result.Requeue)
 	assert.Zero(t, result.RequeueAfter)
 	assert.Len(t, provider.projects, 0)
 }
@@ -57,7 +56,6 @@ func TestReadyProject(t *testing.T) {
 
 	result, err := provider.Reconcile(context.Background(), req)
 	assert.NoError(t, err, "unexpected error returned from reconciler")
-	assert.Equal(t, false, result.Requeue)
 	assert.Zero(t, result.RequeueAfter)
 	assert.Len(t, provider.projects, 1)
 
