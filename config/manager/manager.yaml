@@ -65,7 +65,7 @@ spec:
           - --leader-elect
           - --health-probe-bind-address=:8081
           - --server-config=/config/config.yaml
-        image: controller:latest
+        image: ghcr.io/datum-cloud/workload-operator:latest
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

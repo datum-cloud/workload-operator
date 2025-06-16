@@ -19,7 +19,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"go.datum.net/workload-operator/internal/providers"
+	multiclusterproviders "go.miloapis.com/milo/pkg/multicluster-runtime"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -211,7 +211,7 @@ type DiscoveryConfig struct {
 	// Mode is the mode that the operator should use to discover clusters.
 	//
 	// Defaults to "single"
-	Mode providers.Provider `json:"mode"`
+	Mode multiclusterproviders.Provider `json:"mode"`
 
 	// InternalServiceDiscovery will result in the operator to connect to internal
 	// service addresses for projects.
@@ -230,7 +230,7 @@ type DiscoveryConfig struct {
 
 func SetDefaults_DiscoveryConfig(obj *DiscoveryConfig) {
 	if obj.Mode == "" {
-		obj.Mode = providers.ProviderSingle
+		obj.Mode = multiclusterproviders.ProviderSingle
 	}
 }
 

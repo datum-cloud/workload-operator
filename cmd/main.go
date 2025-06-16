@@ -33,10 +33,10 @@ import (
 	computev1alpha "go.datum.net/workload-operator/api/v1alpha"
 	"go.datum.net/workload-operator/internal/config"
 	"go.datum.net/workload-operator/internal/controller"
-	"go.datum.net/workload-operator/internal/providers"
-	mcdatum "go.datum.net/workload-operator/internal/providers/datum"
 	computewebhook "go.datum.net/workload-operator/internal/webhook"
 	computev1alphawebhooks "go.datum.net/workload-operator/internal/webhook/v1alpha"
+	multiclusterproviders "go.miloapis.com/milo/pkg/multicluster-runtime"
+	milomulticluster "go.miloapis.com/milo/pkg/multicluster-runtime/milo"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -127,7 +127,7 @@ func main() {
 		serverConfig.WebhookServer.Options(ctx, deploymentClusterClient),
 	)
 
-	if serverConfig.Discovery.Mode != providers.ProviderSingle {
+	if serverConfig.Discovery.Mode != multiclusterproviders.ProviderSingle {
 		webhookServer = computewebhook.NewClusterAwareWebhookServer(webhookServer)
 	}
 
@@ -239,13 +239,13 @@ func initializeClusterDiscovery(
 ) (runnables []manager.Runnable, provider runnableProvider, err error) {
 	runnables = append(runnables, deploymentCluster)
 	switch serverConfig.Discovery.Mode {
-	case providers.ProviderSingle:
+	case multiclusterproviders.ProviderSingle:
 		provider = &wrappedSingleClusterProvider{
 			Provider: mcsingle.New("single", deploymentCluster),
 			cluster:  deploymentCluster,
 		}
 
-	case providers.ProviderDatum:
+	case multiclusterproviders.ProviderMilo:
 		discoveryRestConfig, err := serverConfig.Discovery.DiscoveryRestConfig()
 		if err != nil {
 			return nil, nil, fmt.Errorf("unable to get discovery rest config: %w", err)
@@ -267,7 +267,7 @@ func initializeClusterDiscovery(
 			return nil, nil, fmt.Errorf("unable to set up overall controller manager: %w", err)
 		}
 
-		provider, err = mcdatum.New(discoveryManager, mcdatum.Options{
+		provider, err = milomulticluster.New(discoveryManager, milomulticluster.Options{
 			ClusterOptions: []cluster.Option{
 				func(o *cluster.Options) {
 					o.Scheme = scheme
