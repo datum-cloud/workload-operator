@@ -7,8 +7,6 @@ metadata:
     kubernetes.io/description: "View access to all compute resources"
 spec:
   launchStage: Beta
-  inheritedRoles:
-    - name: compute.datumapis.com-viewer
   includedPermissions:
     - compute.datumapis.com/workloads.list
     - compute.datumapis.com/workloads.get
