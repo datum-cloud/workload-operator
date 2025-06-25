@@ -6,6 +6,7 @@ metadata:
     kubernetes.io/display-name: Compute Viewer
     kubernetes.io/description: "View access to all compute resources"
 spec:
+  launchStage: Beta
   inheritedRoles:
     - name: compute.datumapis.com-viewer
   includedPermissions:

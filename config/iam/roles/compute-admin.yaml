@@ -6,6 +6,7 @@ metadata:
     kubernetes.io/display-name: Compute Admin
     kubernetes.io/description: "Full access to all compute resources"
 spec:
+  launchStage: Beta
   inheritedRoles:
     - name: compute.datumapis.com-admin
   includedPermissions:
