@@ -1,0 +1,12 @@
+# This kustomization program is used to create all of the Milo IAM resources to
+# configure the roles that are available to users and the resources protected by
+# the IAM system.
+#
+# This is created as a component so it can be included with other
+# kustomizations.
+apiVersion: kustomization.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - protected-resources/
+  - roles/

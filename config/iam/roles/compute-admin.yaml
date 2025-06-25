@@ -1,0 +1,14 @@
+apiVersion: iam.miloapis.com/v1alpha1
+kind: Role
+metadata:
+  name: compute-admin
+  annotations:
+    kubernetes.io/display-name: Compute Admin
+    kubernetes.io/description: "Full access to all compute resources"
+spec:
+  inheritedRoles:
+    - name: compute.datumapis.com-admin
+  includedPermissions:
+    - compute.datumapis.com/workloads.create
+    - compute.datumapis.com/workloads.update
+    - compute.datumapis.com/workloads.delete
