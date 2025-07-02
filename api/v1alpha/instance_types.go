@@ -26,8 +26,37 @@ type InstanceSpec struct {
 	// +kubebuilder:validation:Optional
 	// +listType=map
 	// +listMapKey=name
-
 	Volumes []InstanceVolume `json:"volumes,omitempty"`
+
+	// The location which the instance has been scheduled to
+	//
+	// +kubebuilder:validation:Optional
+	Location *networkingv1alpha.LocationReference `json:"location,omitempty"`
+
+	// Controller contains settings driven by the controller managing the instance.
+	//
+	// +kubebuilder:validation:Optional
+	Controller *InstanceController `json:"controller,omitempty"`
+}
+
+type InstanceController struct {
+	// TemplateHash is the hash of the instance template applied for this instance.
+	//
+	// +kubebuilder:validation:Required
+	TemplateHash string `json:"templateHash"`
+
+	// SchedulingGates is a list of gates that must be satisfied before the
+	// instance can be scheduled.
+	//
+	// +kubebuilder:validation:Optional
+	// +listType=map
+	// +listMapKey=name
+	SchedulingGates []SchedulingGate `json:"schedulingGates,omitempty"`
+}
+
+type SchedulingGate struct {
+	// The name of the gate.
+	Name string `json:"name"`
 }
 
 type InstanceRuntimeSpec struct {
@@ -337,7 +366,59 @@ type InstanceStatus struct {
 
 	// Network interface information
 	NetworkInterfaces []InstanceNetworkInterfaceStatus `json:"networkInterfaces,omitempty"`
+
+	// Controller contains status information about the controller managing the instance.
+	//
+	// +kubebuilder:validation:Optional
+	Controller *InstanceControllerStatus `json:"controller,omitempty"`
 }
+
+type InstanceControllerStatus struct {
+	// ObservedTemplateHash is the hash of the instance template applied for this instance.
+	//
+	// +kubebuilder:validation:Required
+	ObservedTemplateHash string `json:"observedTemplateHash"`
+}
+
+const (
+	// InstanceReady indicates that the instance is ready
+	InstanceReady = "Ready"
+
+	// InstanceRunning indicates that the instance is running
+	InstanceRunning = "Running"
+
+	// InstanceProgrammed indicates that the instance has been programmed
+	InstanceProgrammed = "Programmed"
+)
+
+const (
+	// InstanceReadyReasonSchedulingGatesPresent indicates that the instance is not ready because scheduling gates are present.
+	InstanceReadyReasonSchedulingGatesPresent = "SchedulingGatesPresent"
+
+	// InstanceReadyReasonRunning indicates that the instance is running
+	InstanceReadyReasonRunning = "Running"
+
+	// InstanceRunningReasonStopped indicates that the instance is stopped
+	InstanceRunningReasonStopped = "Stopped"
+
+	// InstanceRunningReasonStarting indicates that the instance is starting
+	InstanceRunningReasonStarting = "Starting"
+
+	// InstanceRunningReasonStopping indicates that the instance is stopping
+	InstanceRunningReasonStopping = "Stopping"
+
+	// InstanceRunningReasonRunning indicates that the instance is running
+	InstanceRunningReasonRunning = "Running"
+
+	// InstanceProgrammedReasonPendingProgramming indicates that the instance has not been programmed
+	InstanceProgrammedReasonPendingProgramming = "PendingProgramming"
+
+	// InstanceProgrammedReasonProgrammingInProgress indicates that the instance is being programmed.
+	InstanceProgrammedReasonProgrammingInProgress = "ProgrammingInProgress"
+
+	// InstanceProgrammedReasonProgrammed indicates that the instance has been programmed
+	InstanceProgrammedReasonProgrammed = "Programmed"
+)
 
 type InstanceTemplateSpec struct {
 	// Metadata of the instances created from this template
@@ -355,15 +436,21 @@ type InstanceTemplateSpec struct {
 
 // Instance is the Schema for the instances API
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
-// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].reason`
-// +kubebuilder:printcolumn:name="Network IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.networkIP`,priority=1
-// +kubebuilder:printcolumn:name="External IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.externalIP`,priority=1
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
+// +kubebuilder:printcolumn:name="Network IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.networkIP`
+// +kubebuilder:printcolumn:name="External IP",type=string,JSONPath=`.status.networkInterfaces[0].assignments.externalIP`
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`,priority=1
 type Instance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   InstanceSpec   `json:"spec,omitempty"`
+	// Spec defines the desired state of an Instance.
+	Spec InstanceSpec `json:"spec,omitempty"`
+
+	// Status defines the current state of an Instance.
+	//
+	// +kubebuilder:default={conditions:{{type:"Programmed",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Running",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"},{type:"Ready",status:"Unknown",reason:"Pending", message:"Waiting for controller", lastTransitionTime: "1970-01-01T00:00:00Z"}}}
 	Status InstanceStatus `json:"status,omitempty"`
 }
 

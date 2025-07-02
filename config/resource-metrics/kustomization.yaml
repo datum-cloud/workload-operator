@@ -5,7 +5,7 @@ configMapGenerator:
   - name: workload-services-metrics
     options:
       labels:
-        telemetry.datumapis.com/resource-metrics-config: "true"
+        telemetry.miloapis.com/resource-metrics-config: "true"
 
     files:
       - instances.yaml

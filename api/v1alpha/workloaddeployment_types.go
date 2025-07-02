@@ -46,17 +46,17 @@ type WorkloadDeploymentStatus struct {
 	// Known condition types are: "Available", "Progressing"
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// The number of instances created by a deployment
+	// The number of instances created
 	Replicas int32 `json:"replicas"`
 
-	// The number of instances created by a deployment and have the latest
-	// deployment generation settings applied.
+	// The number of instances which have the latest workload settings applied.
 	CurrentReplicas int32 `json:"currentReplicas"`
 
-	// The desired number of instances to be managed by a deployment.
+	// The desired number of instances
 	DesiredReplicas int32 `json:"desiredReplicas"`
 
-	// TODO(jreese) ReadyReplicas?
+	// The number of instances which are ready.
+	ReadyReplicas int32 `json:"readyReplicas"`
 }
 
 const (
@@ -70,10 +70,14 @@ const (
 
 // WorkloadDeployment is the Schema for the workloaddeployments API
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="Location Namespce",type=string,JSONPath=`.status.location.namespace`
-// +kubebuilder:printcolumn:name="Location Name",type=string,JSONPath=`.status.location.name`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].reason`
+// +kubebuilder:printcolumn:name="Replicas",type=string,JSONPath=`.status.replicas`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.readyReplicas`
+// +kubebuilder:printcolumn:name="Desired",type=string,JSONPath=`.status.desiredReplicas`
+// +kubebuilder:printcolumn:name="Up-to-date",type=string,JSONPath=`.status.currentReplicas`
+// +kubebuilder:printcolumn:name="Location Namespace",type=string,JSONPath=`.status.location.namespace`,priority=1
+// +kubebuilder:printcolumn:name="Location Name",type=string,JSONPath=`.status.location.name`,priority=1
 type WorkloadDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
