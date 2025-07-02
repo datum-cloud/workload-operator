@@ -5,187 +5,276 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/proto"
+	"github.com/stretchr/testify/require"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
-	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	computev1alpha "go.datum.net/workload-operator/api/v1alpha"
 )
 
-type testManager struct {
-	ctrl.Manager
-	client client.Client
-	scheme *runtime.Scheme
-}
-
-func (m *testManager) GetClient() client.Client {
-	return m.client
-}
-
-func (m *testManager) GetScheme() *runtime.Scheme {
-	return m.scheme
-}
-
-func TestInstanceReconciler(t *testing.T) {
-	scheme := runtime.NewScheme()
-	utilruntime.Must(computev1alpha.AddToScheme(scheme))
+func TestReconcileInstanceReadyCondition(t *testing.T) {
 
 	tests := []struct {
-		name           string
-		objs           []client.Object
-		req            ctrl.Request
-		expectedErr    string
-		expectedLabels map[string]string
+		name               string
+		instance           *computev1alpha.Instance
+		networkFailureFunc networkFailureChecker
+		expectedChanged    bool
+		expectedCondition  *metav1.Condition
 	}{
 		{
-			name: "missing controller owner in instance",
-			objs: []client.Object{
-				&computev1alpha.Instance{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "instance-no-owner",
-						Namespace: "default",
-					},
+			name: "instance without ready condition should create default",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
 				},
 			},
-			req:         ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "instance-no-owner"}},
-			expectedErr: "failed to get controller owner of Instance",
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             computev1alpha.InstanceProgrammedReasonPendingProgramming,
+				Message:            "Instance has not been programmed",
+				ObservedGeneration: 1,
+			},
 		},
 		{
-			name: "workload deployment not found",
-			objs: []client.Object{
-				&computev1alpha.Instance{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "instance-missing-wd",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: "compute.datumapis.com/v1alpha",
-								Kind:       "WorkloadDeployment",
-								Name:       "wd1",
-								UID:        "33c325cb-3f2e-4b2a-be0c-6d7e03aa475a",
-								Controller: proto.Bool(true),
-							},
+			name: "instance with scheduling gates should set scheduling gates present",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Spec: computev1alpha.InstanceSpec{
+					Controller: &computev1alpha.InstanceController{
+						SchedulingGates: []computev1alpha.SchedulingGate{
+							{Name: "Network"},
+						},
+					},
+				},
+				Status: computev1alpha.InstanceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               computev1alpha.InstanceReady,
+							Status:             metav1.ConditionFalse,
+							Reason:             computev1alpha.InstanceProgrammedReasonPendingProgramming,
+							Message:            "Instance has not been programmed",
+							ObservedGeneration: 1,
+							LastTransitionTime: metav1.Now(),
 						},
 					},
 				},
 			},
-			req:         ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "instance-missing-wd"}},
-			expectedErr: "not found",
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             computev1alpha.InstanceReadyReasonSchedulingGatesPresent,
+				Message:            "Scheduling gates present: Network",
+				ObservedGeneration: 1,
+			},
 		},
 		{
-			name: "missing controller owner in workload deployment",
-			objs: []client.Object{
-				&computev1alpha.Instance{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "instance-wd-no-owner",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: "compute.datumapis.com/v1alpha",
-								Kind:       "WorkloadDeployment",
-								Name:       "wd1",
-								UID:        "33c325cb-3f2e-4b2a-be0c-6d7e03aa475a",
-								Controller: proto.Bool(true),
-							},
+			name: "instance with scheduling gates and network failure should set network failed",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Spec: computev1alpha.InstanceSpec{
+					Controller: &computev1alpha.InstanceController{
+						SchedulingGates: []computev1alpha.SchedulingGate{
+							{Name: "Network"},
 						},
 					},
 				},
-				&computev1alpha.WorkloadDeployment{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "wd1",
-						Namespace: "default",
-						// Missing controller owner
-					},
-				},
 			},
-			req:         ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "instance-wd-no-owner"}},
-			expectedErr: "failed to get controller owner of WorkloadDeployment",
+			networkFailureFunc: func(ctx context.Context, upstreamClient client.Client, instance *computev1alpha.Instance) (bool, string, error) {
+				return true, "Network creation failed: timeout", nil
+			},
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             "NetworkFailedToCreate",
+				Message:            "Network creation failed: timeout",
+				ObservedGeneration: 1,
+			},
 		},
 		{
-			name: "successful reconcile and update",
-			objs: []client.Object{
-				&computev1alpha.Instance{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "instance-success",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: "compute.datumapis.com/v1alpha",
-								Kind:       "WorkloadDeployment",
-								Name:       "wd1",
-								UID:        "33c325cb-3f2e-4b2a-be0c-6d7e03aa475a",
-								Controller: proto.Bool(true),
-							},
-						},
-					},
+			name: "instance not programmed should set pending programming",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
 				},
-				&computev1alpha.WorkloadDeployment{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "wd1",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: "compute.datumapis.com/v1alpha",
-								Kind:       "Workload",
-								Name:       "w1",
-								UID:        "2561b624-3f7d-49db-bc74-b9dc71c4c08d",
-								Controller: proto.Bool(true),
-							},
+				Status: computev1alpha.InstanceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:    computev1alpha.InstanceProgrammed,
+							Status:  metav1.ConditionFalse,
+							Reason:  "TestReason",
+							Message: "Test message",
 						},
 					},
 				},
 			},
-			req:         ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "instance-success"}},
-			expectedErr: "",
-			expectedLabels: map[string]string{
-				computev1alpha.WorkloadUIDLabel:           "2561b624-3f7d-49db-bc74-b9dc71c4c08d",
-				computev1alpha.WorkloadDeploymentUIDLabel: "33c325cb-3f2e-4b2a-be0c-6d7e03aa475a",
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             "TestReason",
+				Message:            "Test message",
+				ObservedGeneration: 1,
+			},
+		},
+		{
+			name: "instance programmed but not running should wait for running",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Status: computev1alpha.InstanceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:    computev1alpha.InstanceProgrammed,
+							Status:  metav1.ConditionTrue,
+							Reason:  computev1alpha.InstanceProgrammedReasonProgrammed,
+							Message: "Instance has been programmed",
+						},
+						{
+							Type:    computev1alpha.InstanceRunning,
+							Status:  metav1.ConditionFalse,
+							Reason:  "TestReason",
+							Message: "Test message",
+						},
+					},
+				},
+			},
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             "TestReason",
+				Message:            "Test message",
+				ObservedGeneration: 1,
+			},
+		},
+		{
+			name: "instance fully ready should set ready condition",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Status: computev1alpha.InstanceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:    computev1alpha.InstanceProgrammed,
+							Status:  metav1.ConditionTrue,
+							Reason:  computev1alpha.InstanceProgrammedReasonProgrammed,
+							Message: "Instance has been programmed",
+						},
+						{
+							Type:    computev1alpha.InstanceRunning,
+							Status:  metav1.ConditionTrue,
+							Reason:  computev1alpha.InstanceRunningReasonRunning,
+							Message: "Instance is running",
+						},
+					},
+				},
+			},
+			expectedChanged: true,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             computev1alpha.InstanceReadyReasonRunning,
+				Message:            "Instance is ready",
+				ObservedGeneration: 1,
+			},
+		},
+		{
+			name: "no change when condition already matches",
+			instance: &computev1alpha.Instance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-instance",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Status: computev1alpha.InstanceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               computev1alpha.InstanceReady,
+							Status:             metav1.ConditionTrue,
+							Reason:             computev1alpha.InstanceReadyReasonRunning,
+							Message:            "Instance is ready",
+							ObservedGeneration: 1,
+							LastTransitionTime: metav1.Now(),
+						},
+						{
+							Type:    computev1alpha.InstanceProgrammed,
+							Status:  metav1.ConditionTrue,
+							Reason:  computev1alpha.InstanceProgrammedReasonProgrammed,
+							Message: "Instance has been programmed",
+						},
+						{
+							Type:    computev1alpha.InstanceRunning,
+							Status:  metav1.ConditionTrue,
+							Reason:  computev1alpha.InstanceRunningReasonRunning,
+							Message: "Instance is running",
+						},
+					},
+				},
+			},
+			expectedChanged: false,
+			expectedCondition: &metav1.Condition{
+				Type:               computev1alpha.InstanceReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             computev1alpha.InstanceReadyReasonRunning,
+				Message:            "Instance is ready",
+				ObservedGeneration: 1,
 			},
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cl := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(tc.objs...).Build()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 
-			testMgr := &testManager{
-				client: cl,
-				scheme: scheme,
-			}
+			reconciler := &InstanceReconciler{}
 
-			mgr, err := mcmanager.WithMultiCluster(testMgr, nil)
-			if err != nil {
-				t.Fatalf("failed to create manager: %v", err)
-			}
-
-			reconciler := &InstanceReconciler{mgr}
-			_, err = reconciler.Reconcile(context.Background(), mcreconcile.Request{
-				Request:     tc.req,
-				ClusterName: "",
-			})
-
-			// Check error
-			if tc.expectedErr == "" {
-				assert.NoError(t, err)
-			} else {
-				assert.ErrorContains(t, err, tc.expectedErr)
-			}
-
-			// If labels are expected, fetch the instance and validate the labels.
-			if tc.expectedLabels != nil {
-				instance := &computev1alpha.Instance{}
-				if err := cl.Get(context.Background(), tc.req.NamespacedName, instance); err != nil {
-					t.Fatalf("failed to get instance: %v", err)
+			networkFailureFunc := tt.networkFailureFunc
+			if networkFailureFunc == nil {
+				networkFailureFunc = func(ctx context.Context, upstreamClient client.Client, instance *computev1alpha.Instance) (bool, string, error) {
+					return false, "", nil
 				}
-				assert.Equal(t, tc.expectedLabels, instance.Labels)
 			}
+
+			changed, err := reconciler.reconcileInstanceReadyCondition(
+				ctx,
+				nil,
+				tt.instance,
+				networkFailureFunc,
+			)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedChanged, changed)
+
+			readyCondition := apimeta.FindStatusCondition(tt.instance.Status.Conditions, computev1alpha.InstanceReady)
+			require.NotNil(t, readyCondition)
+
+			assert.Equal(t, tt.expectedCondition.Type, readyCondition.Type)
+			assert.Equal(t, tt.expectedCondition.Status, readyCondition.Status)
+			assert.Equal(t, tt.expectedCondition.Reason, readyCondition.Reason)
+			assert.Equal(t, tt.expectedCondition.Message, readyCondition.Message)
+			assert.Equal(t, tt.expectedCondition.ObservedGeneration, readyCondition.ObservedGeneration)
 		})
 	}
 }

@@ -52,17 +52,20 @@ type WorkloadStatus struct {
 	// Known condition types are: "Available", "Progressing"
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// The number of instances created by a placement
+	// The number of deployments that currently exist
+	Deployments int32 `json:"deployments"`
+
+	// The number of instances that currently exist
 	Replicas int32 `json:"replicas"`
 
-	// The number of instances created by a placement and have the latest
-	// workload generation settings applied.
+	// The number of instances which have the latest workload settings applied.
 	CurrentReplicas int32 `json:"currentReplicas"`
 
-	// The desired number of instances to be managed by a placement.
+	// The desired number of instances
 	DesiredReplicas int32 `json:"desiredReplicas"`
 
-	// TODO(jreese) ReadyReplicas?
+	// The number of instances which are ready.
+	ReadyReplicas int32 `json:"readyReplicas"`
 
 	// The current status of placemetns in a workload.
 	Placements []WorkloadPlacementStatus `json:"placements,omitempty"`
@@ -91,6 +94,11 @@ type WorkloadGatewayStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].reason`
+// +kubebuilder:printcolumn:name="Deployments",type=string,JSONPath=`.status.deployments`
+// +kubebuilder:printcolumn:name="Replicas",type=string,JSONPath=`.status.replicas`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.readyReplicas`
+// +kubebuilder:printcolumn:name="Desired",type=string,JSONPath=`.status.desiredReplicas`
+// +kubebuilder:printcolumn:name="Up-to-date",type=string,JSONPath=`.status.currentReplicas`
 type Workload struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -134,17 +142,17 @@ type WorkloadPlacementStatus struct {
 	// Known condition types are: "Available", "Progressing"
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// The number of instances created by a placement
+	// The number of instances that currently exist
 	Replicas int32 `json:"replicas"`
 
-	// The number of instances created by a placement and have the latest
-	// workload generation settings applied.
+	// The number of instances which have the latest workload settings applied.
 	CurrentReplicas int32 `json:"currentReplicas"`
 
-	// The desired number of instances to be managed by a placement.
+	// The desired number of instances
 	DesiredReplicas int32 `json:"desiredReplicas"`
 
-	// TODO(jreese) ReadyReplicas?
+	// The number of instances which are ready.
+	ReadyReplicas int32 `json:"readyReplicas"`
 }
 
 type HorizontalScaleSettings struct {
@@ -165,7 +173,24 @@ type HorizontalScaleSettings struct {
 
 	// TODO(jreese) wire in behavior
 	// See https://github.com/kubernetes/kubernetes/blob/dd87bc064631354885193fc1a97d0e7b603e77b4/staging/src/k8s.io/api/autoscaling/v2/types.go#L84
+	// Defines the policy for managing instances.
+
+	// TODO(jreese) Add instance update policy? RollingUpdate vs OrderedReady
+
+	// Controls how instances are managed during scale up and down, as well as
+	// during maintenance events.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default=OrderedReady
+	InstanceManagementPolicy InstanceManagementPolicyType `json:"instanceManagementPolicy,omitempty"`
 }
+
+type InstanceManagementPolicyType string
+
+const (
+	OrderedReadyInstanceManagementPolicyType InstanceManagementPolicyType = "OrderedReady"
+	// ParallelInstanceManagementPolicyType     InstanceManagementPolicyType = "Parallel"
+)
 
 type MetricSpec struct {
 	// Resource metrics known to Datum.

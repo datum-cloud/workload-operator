@@ -18,18 +18,20 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.conditions[?(@.type=="Available")].status
-      name: Available
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Available")].reason
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
       name: Reason
       type: string
     - jsonPath: .status.networkInterfaces[0].assignments.networkIP
       name: Network IP
-      priority: 1
       type: string
     - jsonPath: .status.networkInterfaces[0].assignments.externalIP
       name: External IP
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].message
+      name: Message
       priority: 1
       type: string
     name: v1alpha
@@ -55,8 +57,48 @@ spec:
           metadata:
             type: object
           spec:
-            description: InstanceSpec defines the desired state of Instance
+            description: Spec defines the desired state of an Instance.
             properties:
+              controller:
+                description: Controller contains settings driven by the controller
+                  managing the instance.
+                properties:
+                  schedulingGates:
+                    description: |-
+                      SchedulingGates is a list of gates that must be satisfied before the
+                      instance can be scheduled.
+                    items:
+                      properties:
+                        name:
+                          description: The name of the gate.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  templateHash:
+                    description: TemplateHash is the hash of the instance template
+                      applied for this instance.
+                    type: string
+                required:
+                - templateHash
+                type: object
+              location:
+                description: The location which the instance has been scheduled to
+                properties:
+                  name:
+                    description: Name of a datum location
+                    type: string
+                  namespace:
+                    description: Namespace for the datum location
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
               networkInterfaces:
                 description: Network interface configuration.
                 items:
@@ -519,6 +561,9 @@ spec:
                 - resources
                 type: object
               volumes:
+                description: |-
+                  Volumes that must be available to attach to an instance's containers or
+                  Virtual Machine.
                 items:
                   properties:
                     configMap:
@@ -766,7 +811,24 @@ spec:
             - runtime
             type: object
           status:
-            description: InstanceStatus defines the observed state of Instance
+            default:
+              conditions:
+              - lastTransitionTime: "1970-01-01T00:00:00Z"
+                message: Waiting for controller
+                reason: Pending
+                status: Unknown
+                type: Programmed
+              - lastTransitionTime: "1970-01-01T00:00:00Z"
+                message: Waiting for controller
+                reason: Pending
+                status: Unknown
+                type: Running
+              - lastTransitionTime: "1970-01-01T00:00:00Z"
+                message: Waiting for controller
+                reason: Pending
+                status: Unknown
+                type: Ready
+            description: Status defines the current state of an Instance.
             properties:
               conditions:
                 description: |-
@@ -827,6 +889,17 @@ spec:
                   - type
                   type: object
                 type: array
+              controller:
+                description: Controller contains status information about the controller
+                  managing the instance.
+                properties:
+                  observedTemplateHash:
+                    description: ObservedTemplateHash is the hash of the instance
+                      template applied for this instance.
+                    type: string
+                required:
+                - observedTemplateHash
+                type: object
               networkInterfaces:
                 description: Network interface information
                 items:

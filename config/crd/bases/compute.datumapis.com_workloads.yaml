@@ -24,6 +24,21 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Available")].reason
       name: Reason
       type: string
+    - jsonPath: .status.deployments
+      name: Deployments
+      type: string
+    - jsonPath: .status.replicas
+      name: Replicas
+      type: string
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: string
+    - jsonPath: .status.desiredReplicas
+      name: Desired
+      type: string
+    - jsonPath: .status.currentReplicas
+      name: Up-to-date
+      type: string
     name: v1alpha
     schema:
       openAPIV3Schema:
@@ -68,6 +83,12 @@ spec:
                       description: Scale settings such as minimum and maximum replica
                         counts.
                       properties:
+                        instanceManagementPolicy:
+                          default: OrderedReady
+                          description: |-
+                            Controls how instances are managed during scale up and down, as well as
+                            during maintenance events.
+                          type: string
                         maxReplicas:
                           description: The maximum number of replicas.
                           format: int32
@@ -122,6 +143,7 @@ spec:
                           format: int32
                           type: integer
                       required:
+                      - instanceManagementPolicy
                       - minReplicas
                       type: object
                   required:
@@ -157,6 +179,47 @@ spec:
                   spec:
                     description: Describes the desired configuration of an instance
                     properties:
+                      controller:
+                        description: Controller contains settings driven by the controller
+                          managing the instance.
+                        properties:
+                          schedulingGates:
+                            description: |-
+                              SchedulingGates is a list of gates that must be satisfied before the
+                              instance can be scheduled.
+                            items:
+                              properties:
+                                name:
+                                  description: The name of the gate.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          templateHash:
+                            description: TemplateHash is the hash of the instance
+                              template applied for this instance.
+                            type: string
+                        required:
+                        - templateHash
+                        type: object
+                      location:
+                        description: The location which the instance has been scheduled
+                          to
+                        properties:
+                          name:
+                            description: Name of a datum location
+                            type: string
+                          namespace:
+                            description: Namespace for the datum location
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
                       networkInterfaces:
                         description: Network interface configuration.
                         items:
@@ -630,6 +693,9 @@ spec:
                         - resources
                         type: object
                       volumes:
+                        description: |-
+                          Volumes that must be available to attach to an instance's containers or
+                          Virtual Machine.
                         items:
                           properties:
                             configMap:
@@ -954,13 +1020,16 @@ spec:
                   type: object
                 type: array
               currentReplicas:
-                description: |-
-                  The number of instances created by a placement and have the latest
-                  workload generation settings applied.
+                description: The number of instances which have the latest workload
+                  settings applied.
+                format: int32
+                type: integer
+              deployments:
+                description: The number of deployments that currently exist
                 format: int32
                 type: integer
               desiredReplicas:
-                description: The desired number of instances to be managed by a placement.
+                description: The desired number of instances
                 format: int32
                 type: integer
               gateway:
@@ -1302,37 +1371,46 @@ spec:
                         type: object
                       type: array
                     currentReplicas:
-                      description: |-
-                        The number of instances created by a placement and have the latest
-                        workload generation settings applied.
+                      description: The number of instances which have the latest workload
+                        settings applied.
                       format: int32
                       type: integer
                     desiredReplicas:
-                      description: The desired number of instances to be managed by
-                        a placement.
+                      description: The desired number of instances
                       format: int32
                       type: integer
                     name:
                       description: The name of the placement
                       type: string
+                    readyReplicas:
+                      description: The number of instances which are ready.
+                      format: int32
+                      type: integer
                     replicas:
-                      description: The number of instances created by a placement
+                      description: The number of instances that currently exist
                       format: int32
                       type: integer
                   required:
                   - currentReplicas
                   - desiredReplicas
                   - name
+                  - readyReplicas
                   - replicas
                   type: object
                 type: array
+              readyReplicas:
+                description: The number of instances which are ready.
+                format: int32
+                type: integer
               replicas:
-                description: The number of instances created by a placement
+                description: The number of instances that currently exist
                 format: int32
                 type: integer
             required:
             - currentReplicas
+            - deployments
             - desiredReplicas
+            - readyReplicas
             - replicas
             type: object
         required:

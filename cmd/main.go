@@ -180,6 +180,11 @@ func main() {
 
 	// +kubebuilder:scaffold:builder
 
+	if err = controller.AddIndexers(ctx, mgr); err != nil {
+		setupLog.Error(err, "unable to add indexers")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
