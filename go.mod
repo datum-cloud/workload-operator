@@ -7,7 +7,7 @@ toolchain go1.24.2
 require (
 	github.com/google/go-cmp v0.7.0
 	github.com/onsi/ginkgo/v2 v2.23.4
-	github.com/onsi/gomega v1.37.0
+	github.com/onsi/gomega v1.38.0
 	github.com/stretchr/testify v1.10.0
 	go.datum.net/network-services-operator v0.1.0
 	go.miloapis.com/milo v0.0.0-20250613224328-4b8d8b88be08
