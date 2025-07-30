@@ -12,7 +12,7 @@ require (
 	go.datum.net/network-services-operator v0.1.0
 	go.miloapis.com/milo v0.0.0-20250613224328-4b8d8b88be08
 	golang.org/x/crypto v0.39.0
-	golang.org/x/sync v0.15.0
+	golang.org/x/sync v0.16.0
 	google.golang.org/protobuf v1.36.6
 	k8s.io/api v0.33.1
 	k8s.io/apimachinery v0.33.1
