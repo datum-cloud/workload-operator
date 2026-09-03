@@ -106,9 +106,9 @@ function WorkloadsTable({ workloads }: { workloads: FleetWorkload[] }) {
           <StatusBadge type={healthToBadgeType(getValue())}>{getValue()}</StatusBadge>
         ),
       }),
-      columnHelper.accessor((row) => row.reason, {
-        id: 'reason',
-        header: 'Reason',
+      columnHelper.accessor((row) => row.message, {
+        id: 'message',
+        header: 'Message',
         // `max-w-56` isn't a class the host's compiled CSS contains (see ui/CLAUDE.md) — inline style instead.
         cell: ({ getValue }) => (
           <span className="block truncate" style={{ maxWidth: '14rem' }} title={getValue()}>

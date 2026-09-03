@@ -49,7 +49,7 @@ import { Link, useParams } from 'react-router';
 const PREVIEW_COUNT = 5;
 
 function PreviewRow({ entry }: { entry: FleetWorkload }) {
-  const { project, workload, reason, statusSince } = entry;
+  const { project, workload, message, statusSince } = entry;
   return (
     <div className="flex flex-wrap items-center gap-3 border-b px-3 py-2 text-sm last:border-b-0">
       <StatusBadge type={healthToBadgeType(workload.health)}>{workload.health}</StatusBadge>
@@ -59,7 +59,7 @@ function PreviewRow({ entry }: { entry: FleetWorkload }) {
         {workload.name}
       </Link>
       <Text size="sm" textColor="muted" className="truncate">
-        {reason}
+        {message}
       </Text>
       <div className="ml-auto flex items-center gap-1 text-right">
         {project.organization && (

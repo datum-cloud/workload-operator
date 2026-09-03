@@ -135,8 +135,8 @@ export interface FleetConsumerProject {
 export interface FleetWorkload {
   project: FleetConsumerProject;
   workload: Workload;
-  /** The `Available` condition's reason/message, or the health label as a fallback — the closest thing to "why," without opening the workload. */
-  reason: string;
+  /** The `Available` condition's message (human-readable), falling back to its reason code or the health label — the closest thing to "why," without opening the workload. */
+  message: string;
   /** When the workload last transitioned to its current `Available` status — falls back to `createdAt` if never observed. */
   statusSince: Date;
 }
@@ -252,14 +252,15 @@ export interface FleetHealth {
 }
 
 /**
- * The `Available` condition's reason/message, or the workload's own health
- * label as a last resort — every row gets *some* reason text, even one with
- * no conditions reported at all (and even a healthy one, if its `Available`
- * condition carries no reason of its own).
+ * The `Available` condition's human-readable message, falling back to its
+ * terse reason code and then the workload's own health label as a last
+ * resort — every row gets *some* text, even one with no conditions reported
+ * at all (and even a healthy one, if its `Available` condition carries no
+ * message of its own).
  */
-function reasonFor(workload: Workload): string {
+function messageFor(workload: Workload): string {
   const available = workload.conditions.find((c) => c.type === 'Available');
-  return available?.reason ?? available?.message ?? workload.health;
+  return available?.message ?? available?.reason ?? workload.health;
 }
 
 /**
@@ -341,7 +342,7 @@ async function fetchFleetHealth(serviceResourceName: string): Promise<FleetHealt
     .flatMap((o) => o.workloads.map((workload) => ({ project: o.project, workload })))
     .map((w) => ({
       ...w,
-      reason: reasonFor(w.workload),
+      message: messageFor(w.workload),
       statusSince: statusSinceFor(w.workload),
     }))
     .sort((a, b) => {
