@@ -64,34 +64,6 @@ const rowClassName = 'border-border border-b last:border-b-0 hover:bg-muted/40';
 function WorkloadsTable({ workloads }: { workloads: FleetWorkload[] }) {
   const columns = useMemo(
     () => [
-      columnHelper.accessor((row) => row.workload.health, {
-        id: 'health',
-        header: ({ column }) => <SortableHeader column={column} title="Health" />,
-        cell: ({ getValue }) => (
-          <StatusBadge type={healthToBadgeType(getValue())}>{getValue()}</StatusBadge>
-        ),
-      }),
-      columnHelper.accessor((row) => row.workload.name, {
-        id: 'workload',
-        header: ({ column }) => <SortableHeader column={column} title="Workload" />,
-        cell: ({ row }) => (
-          <Link
-            to={`/customers/projects/${row.original.project.name}/plugins/workloads/${row.original.workload.name}`}
-            className="hover:underline">
-            <span className="font-mono text-sm">{row.original.workload.name}</span>
-          </Link>
-        ),
-      }),
-      columnHelper.accessor((row) => row.reason, {
-        id: 'reason',
-        header: 'Reason',
-        // `max-w-56` isn't a class the host's compiled CSS contains (see ui/CLAUDE.md) — inline style instead.
-        cell: ({ getValue }) => (
-          <span className="block truncate" style={{ maxWidth: '14rem' }} title={getValue()}>
-            {getValue()}
-          </span>
-        ),
-      }),
       columnHelper.accessor((row) => row.project.displayName, {
         id: 'project',
         header: ({ column }) => <SortableHeader column={column} title="Consumer" />,
@@ -115,6 +87,34 @@ function WorkloadsTable({ workloads }: { workloads: FleetWorkload[] }) {
             </div>
           );
         },
+      }),
+      columnHelper.accessor((row) => row.workload.name, {
+        id: 'workload',
+        header: ({ column }) => <SortableHeader column={column} title="Workload" />,
+        cell: ({ row }) => (
+          <Link
+            to={`/customers/projects/${row.original.project.name}/plugins/workloads/${row.original.workload.name}`}
+            className="hover:underline">
+            <span className="font-mono text-sm">{row.original.workload.name}</span>
+          </Link>
+        ),
+      }),
+      columnHelper.accessor((row) => row.workload.health, {
+        id: 'health',
+        header: ({ column }) => <SortableHeader column={column} title="Health" />,
+        cell: ({ getValue }) => (
+          <StatusBadge type={healthToBadgeType(getValue())}>{getValue()}</StatusBadge>
+        ),
+      }),
+      columnHelper.accessor((row) => row.reason, {
+        id: 'reason',
+        header: 'Reason',
+        // `max-w-56` isn't a class the host's compiled CSS contains (see ui/CLAUDE.md) — inline style instead.
+        cell: ({ getValue }) => (
+          <span className="block truncate" style={{ maxWidth: '14rem' }} title={getValue()}>
+            {getValue()}
+          </span>
+        ),
       }),
       columnHelper.display({
         id: 'ready',
