@@ -9,7 +9,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	// Pinned to network-services-operator main: the latest tag (v0.26.0)
 	// predates the Prepared condition this gate reads. Re-pin to a tagged
 	// release once one carries it.
@@ -39,7 +39,7 @@ require (
 	github.com/containerd/console v1.0.5 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/containerd/v2 v2.2.2 // indirect
-	github.com/containerd/continuity v0.4.5 // indirect
+	github.com/containerd/continuity v0.5.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
@@ -187,7 +187,7 @@ require (
 	github.com/google/go-containerregistry v0.21.6
 	github.com/moby/buildkit v0.29.0
 	github.com/sirupsen/logrus v1.9.4
-	github.com/tonistiigi/fsutil v0.0.0-20251211185533-a2aa163d723f
+	github.com/tonistiigi/fsutil v0.0.0-20260819142231-83cac42c1c52
 	go.datum.net/datumctl v0.17.1-0.20260710003126-296c2fcbbd67
 	mvdan.cc/sh/v3 v3.12.0
 )
