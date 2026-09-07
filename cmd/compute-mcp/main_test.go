@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -104,8 +105,8 @@ func TestDepsFromRequestRequiresCredentials(t *testing.T) {
 		project string
 		want    string
 	}{
-		{name: "no token", project: "my-project", want: "no bearer token"},
-		{name: "wrong scheme", auth: "Basic abc", project: "my-project", want: "no bearer token"},
+		{name: "no token", project: "my-project", want: "no credentials"},
+		{name: "wrong scheme", auth: "Basic abc", project: "my-project", want: "no credentials"},
 		{name: "no project", auth: "Bearer " + testToken, want: "no project"},
 		{name: "invalid project", auth: "Bearer " + testToken, project: "a/b", want: "invalid project"},
 	}
@@ -134,6 +135,75 @@ func TestDepsFromRequestRequiresCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCredentialErrorsBlameTheClientNotTheUser pins the copy on the errors a
+// request fails with before any read happens. They reach a person through an
+// assistant, so they are customer-facing text. The first wording said "the
+// caller must forward their credentials"; an assistant read "caller" as the
+// person it was talking to and told them to re-authenticate, which cannot
+// work, because the credential is the calling client's to send.
+//
+// internal/agent/copy_test.go holds the repo's plain-language denylist, but it
+// scans values inside that package and cannot reach a string in cmd/, so the
+// terms that could plausibly turn up in this copy are repeated here.
+func TestCredentialErrorsBlameTheClientNotTheUser(t *testing.T) {
+	banned := regexp.MustCompile(`(?i)\b(rbac|control planes?|reconcil|milo|pods?|controllers?)\b`)
+	// Second person is the failure mode itself: an error that says "you" hands
+	// the model someone to instruct, and the only person it can instruct is the
+	// one who cannot fix this.
+	secondPerson := regexp.MustCompile(`(?i)\byou(r|rs)?\b`)
+
+	for name, err := range credentialErrors(t) {
+		t.Run(name, func(t *testing.T) {
+			msg := err.Error()
+			if !strings.Contains(msg, "re-authenticating will not help") {
+				t.Errorf("error = %q, want it to rule out re-authenticating", msg)
+			}
+			if !strings.Contains(msg, "client that called this tool") ||
+				!strings.Contains(msg, "whoever operates that client") {
+				t.Errorf("error = %q, want it to name the client as the actor", msg)
+			}
+			if m := secondPerson.FindString(msg); m != "" {
+				t.Errorf("error = %q addresses the reader as %q; the reader cannot fix it", msg, m)
+			}
+			if m := banned.FindString(msg); m != "" {
+				t.Errorf("error = %q uses %q, which a customer has no way to read", msg, m)
+			}
+		})
+	}
+}
+
+// credentialErrors collects one error per way a request can fail before a read,
+// keyed by what went missing.
+func credentialErrors(t *testing.T) map[string]error {
+	t.Helper()
+
+	out := map[string]error{}
+	for name, h := range map[string]struct{ auth, project string }{
+		"no-token":   {project: "acme-prod"},
+		"no-project": {auth: "Bearer " + testToken},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		if h.auth != "" {
+			r.Header.Set("Authorization", h.auth)
+		}
+		if h.project != "" {
+			r.Header.Set(projectHeader, h.project)
+		}
+		_, err := depsFromRequest(r, baseConfig())(context.Background())
+		if err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+		out[name] = err
+	}
+
+	_, err := clientConfig(baseConfig(), testToken, "Not A Project")
+	if err == nil {
+		t.Fatal("invalid-project: expected an error")
+	}
+	out["invalid-project"] = err
+	return out
 }
 
 // TestDepsFromRequestIgnoresToolArguments guards the prompt-injection defense:

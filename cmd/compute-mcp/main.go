@@ -63,6 +63,13 @@ const (
 	// before sending headers.
 	readHeaderTimeout = 10 * time.Second
 
+	// misconfiguredClientNote closes every error a request can fail with before
+	// a read is attempted. All of them are the calling client's configuration,
+	// and the first assistant to relay the old wording told the user to
+	// re-authenticate — so the sentence names the actor and rules that out.
+	misconfiguredClientNote = "The person who asked did nothing wrong and re-authenticating will not " +
+		"help: this is a configuration problem for whoever operates that client"
+
 	// resourceNamespace is where compute's objects live inside a project's
 	// control plane: the project routes to the control plane, and within it
 	// everything is in "default". Mirrors util.ResourceNamespace, not imported
@@ -211,10 +218,13 @@ func depsFromRequest(r *http.Request, baseConfig *rest.Config) agent.DepsFor {
 	return func(context.Context) (agent.ToolDeps, error) {
 		if token == "" {
 			return agent.ToolDeps{}, fmt.Errorf(
-				"no bearer token on the request: compute reads as the calling user, so the caller must forward their credentials")
+				"no credentials on this request: the client that called this tool did not forward "+
+					"the user's identity. %s", misconfiguredClientNote)
 		}
 		if project == "" {
-			return agent.ToolDeps{}, fmt.Errorf("no project on the request: set the %s header", projectHeader)
+			return agent.ToolDeps{}, fmt.Errorf(
+				"no project on this request: the client that called this tool did not set the %s "+
+					"header. %s", projectHeader, misconfiguredClientNote)
 		}
 
 		c, err := clientForToken(baseConfig, token, project)
@@ -241,7 +251,8 @@ func clientConfig(baseConfig *rest.Config, token, project string) (*rest.Config,
 	// The project arrives in a header and is interpolated into a URL path, so
 	// it is validated before it can reshape that path into another API route.
 	if errs := validation.IsDNS1123Subdomain(project); len(errs) > 0 {
-		return nil, fmt.Errorf("invalid project %q on the %s header: %s", project, projectHeader, strings.Join(errs, "; "))
+		return nil, fmt.Errorf("invalid project %q on the %s header sent by the client that called "+
+			"this tool: %s. %s", project, projectHeader, strings.Join(errs, "; "), misconfiguredClientNote)
 	}
 
 	cfg := rest.AnonymousClientConfig(rest.CopyConfig(baseConfig))
