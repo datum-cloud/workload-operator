@@ -225,6 +225,13 @@ func TestReadsGoThroughTheProjectControlPlane(t *testing.T) {
 	}
 }
 
+// The address a cluster advertises for its own API server, as the kubelet
+// publishes it to a pod. The guard's whole job is spotting this endpoint.
+const (
+	localClusterHost = "10.0.0.1"
+	localClusterPort = "443"
+)
+
 // TestCheckControlPlaneEndpointRejectsTheInClusterFallback pins the startup
 // guard: a pod given no kubeconfig still gets the in-cluster config, and every
 // tool call then fails with a 401 that reads like the caller's credentials are
@@ -239,22 +246,22 @@ func TestCheckControlPlaneEndpointRejectsTheInClusterFallback(t *testing.T) {
 	}{
 		{
 			name:        "in-cluster fallback",
-			serviceHost: "10.0.0.1",
-			servicePort: "443",
+			serviceHost: localClusterHost,
+			servicePort: localClusterPort,
 			host:        "https://10.0.0.1:443",
 			wantErr:     true,
 		},
 		{
 			name:        "in-cluster fallback, trailing slash",
-			serviceHost: "10.0.0.1",
-			servicePort: "443",
+			serviceHost: localClusterHost,
+			servicePort: localClusterPort,
 			host:        "https://10.0.0.1:443/",
 			wantErr:     true,
 		},
 		{
 			name:        "IPv6 in-cluster fallback",
 			serviceHost: "fd00::1",
-			servicePort: "443",
+			servicePort: localClusterPort,
 			host:        "https://[fd00::1]:443",
 			wantErr:     true,
 		},
@@ -262,8 +269,8 @@ func TestCheckControlPlaneEndpointRejectsTheInClusterFallback(t *testing.T) {
 			// The deployment supplied a kubeconfig naming a different control
 			// plane. This is the only correct configuration.
 			name:        "explicit control plane",
-			serviceHost: "10.0.0.1",
-			servicePort: "443",
+			serviceHost: localClusterHost,
+			servicePort: localClusterPort,
 			host:        "https://control-plane.example:6443",
 			wantErr:     false,
 		},
@@ -271,8 +278,8 @@ func TestCheckControlPlaneEndpointRejectsTheInClusterFallback(t *testing.T) {
 			// Same address, different port: a control plane fronted by the
 			// local cluster is still not the local API server.
 			name:        "same host, different port",
-			serviceHost: "10.0.0.1",
-			servicePort: "443",
+			serviceHost: localClusterHost,
+			servicePort: localClusterPort,
 			host:        "https://10.0.0.1:6443",
 			wantErr:     false,
 		},
