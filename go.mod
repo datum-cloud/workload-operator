@@ -13,7 +13,7 @@ require (
 	// Pinned to network-services-operator main: the latest tag (v0.26.0)
 	// predates the Prepared condition this gate reads. Re-pin to a tagged
 	// release once one carries it.
-	go.datum.net/network-services-operator v0.26.1-0.20260821014231-aceb24b1b569
+	go.datum.net/network-services-operator v0.26.4
 	// Pinned by pseudo-version to the commit deployed to staging, which is the
 	// same one network-services-operator pins. The module publishes no tag yet.
 	go.miloapis.com/locations v0.0.0-20260825185141-507ac2cbd48c
@@ -116,7 +116,7 @@ require (
 	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/swag v0.25.4 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/google/cel-go v0.26.0 // indirect
+	github.com/google/cel-go v0.27.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/google/uuid v1.6.0 // indirect
