@@ -834,6 +834,23 @@ A virtual machine runtime will be provided all requested resources.<br/>
         </td>
         <td>true</td>
       </tr><tr>
+        <td><b>class</b></td>
+        <td>string</td>
+        <td>
+          The execution tier the instance runs in. The value names a RuntimeClass
+in the platform catalog, which Datum publishes and customers do not
+define. Publishing a new tier adds a class instead of changing this API.
+
+The class is independent of the runtime shape above. Either a sandbox or
+a virtual machine can run in any class the platform offers.
+
+An empty value selects the class the catalog marks as default. Admission
+records that choice on the workload and never resolves it again, so an
+existing workload keeps the tier, cost, and startup characteristics it
+was created with.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
         <td><b><a href="#workloadspectemplatespecruntimesandbox">sandbox</a></b></td>
         <td>object</td>
         <td>

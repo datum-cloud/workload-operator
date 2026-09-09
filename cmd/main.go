@@ -93,6 +93,7 @@ func init() {
 	utilruntime.Must(config.RegisterDefaults(scheme))
 	utilruntime.Must(computev1alpha.AddToScheme(scheme))
 	utilruntime.Must(networkingv1alpha.AddToScheme(scheme))
+	utilruntime.Must(locationsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(quotav1alpha1.AddToScheme(scheme))
 	utilruntime.Must(karmadapolicyv1alpha1.Install(scheme))
 	utilruntime.Must(karmadaclusterv1alpha1.Install(scheme))
@@ -163,7 +164,10 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	setupLog.Info("feature gates", "NetworkingIntegration", features.FeatureGate.Enabled(features.NetworkingIntegration))
+	setupLog.Info("feature gates",
+		"NetworkingIntegration", features.FeatureGate.Enabled(features.NetworkingIntegration),
+		"RuntimeClasses", features.FeatureGate.Enabled(features.RuntimeClasses),
+	)
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -352,6 +356,7 @@ func main() {
 	if enableManagementControllers {
 		if err = (&controller.WorkloadReconciler{
 			NetworkingEnabled: features.FeatureGate.Enabled(features.NetworkingIntegration),
+			LocationSource:    serverConfig.LocationSource,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "Workload")
 			os.Exit(1)
@@ -376,6 +381,7 @@ func main() {
 		}
 		if err = (&controller.WorkloadDeploymentReconciler{
 			NetworkingEnabled: features.FeatureGate.Enabled(features.NetworkingIntegration),
+			LocationSource:    serverConfig.LocationSource,
 		}).SetupWithManager(mgr, wdOpts); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "WorkloadDeployment")
 			os.Exit(1)
@@ -459,7 +465,7 @@ func main() {
 	}
 
 	if serverConfig.WebhookServer != nil {
-		if err = computev1alphawebhooks.SetupWorkloadWebhookWithManager(mgr); err != nil {
+		if err = computev1alphawebhooks.SetupWorkloadWebhookWithManager(mgr, serverConfig.LocationSource); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Workload")
 			os.Exit(1)
 		}
@@ -805,6 +811,9 @@ func loadServerConfig(path string) (config.WorkloadOperator, error) {
 	if err := runtime.DecodeInto(codecs.UniversalDecoder(), configData, &serverConfig); err != nil {
 		return serverConfig, fmt.Errorf("unable to decode server config: %w", err)
 	}
+	if _, err := serverConfig.LocationSource.Resolve(); err != nil {
+		return serverConfig, fmt.Errorf("invalid server config: %w", err)
+	}
 	return serverConfig, nil
 }
 
@@ -840,8 +849,9 @@ func setupManagementControllers(mgr mcmanager.Manager, federationClient client.C
 	// aggregated downstream by Karmada is mirrored back to the project WD
 	// immediately instead of on the next informer resync.
 	federator := &controller.WorkloadDeploymentFederator{
-		FederationClient:  federationClient,
-		FederationCluster: federationMgr,
+		FederationClient:      federationClient,
+		FederationCluster:     federationMgr,
+		RuntimeClassesEnabled: features.FeatureGate.Enabled(features.RuntimeClasses),
 	}
 	if err := federator.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("WorkloadDeploymentFederator: %w", err)

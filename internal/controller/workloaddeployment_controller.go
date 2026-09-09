@@ -31,6 +31,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 
@@ -61,6 +62,11 @@ type WorkloadDeploymentReconciler struct {
 	// When true, new Instances whose template references ConfigMaps or Secrets
 	// receive the ReferencedData scheduling gate at creation time.
 	enableReferencedDataGate bool
+
+	// LocationSource selects the API group the cell's serving location is read
+	// from. The zero value reads network services, which is what every
+	// deployment does today.
+	LocationSource locations.Source
 }
 
 func effectiveDesiredReplicas(deployment *computev1alpha.WorkloadDeployment) int32 {
@@ -81,6 +87,7 @@ func workloadDeploymentPodSelector(deployment *computev1alpha.WorkloadDeployment
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloaddeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloaddeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloaddeployments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=networking.datumapis.com,resources=servinglocations,verbs=get;list;watch
 // +kubebuilder:rbac:groups=locations.miloapis.com,resources=servinglocations,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.datumapis.com,resources=networkinterfaceclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.datumapis.com,resources=networkinterfaces,verbs=get;list;watch
@@ -140,12 +147,17 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 	existingStatus := *deployment.Status.DeepCopy()
 
 	// Verify that federation delivered this deployment to the requested location.
+	// The cell learns where it sits from a ServingLocation, which only reaches
+	// it through the networking integration. Without that integration the cell
+	// cannot contradict the placement, and instances still run.
 	var location servingLocationResult
-	location, err = r.resolveLocation(ctx, cl.GetClient())
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed resolving location: %w", err)
+	if r.NetworkingEnabled {
+		location, err = r.resolveLocation(ctx, cl.GetClient())
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed resolving location: %w", err)
+		}
+		location.evaluate(&deployment)
 	}
-	location.evaluate(&deployment)
 
 	// Collect all instances for this deployment
 	listOpts := client.MatchingLabels{
@@ -626,7 +638,7 @@ type servingLocationResult struct {
 
 	// servingLocation is the single ServingLocation the cell was delivered, or
 	// nil when it was delivered none or more than one.
-	servingLocation *locationsv1alpha1.ServingLocation
+	servingLocation *locations.ServingLocation
 
 	// reason and message are the Available condition the deployment should
 	// report while the location is unusable. Both are empty once it is usable.
@@ -649,14 +661,14 @@ func (r *WorkloadDeploymentReconciler) resolveLocation(
 	ctx context.Context,
 	c client.Client,
 ) (servingLocationResult, error) {
-	var servingLocations locationsv1alpha1.ServingLocationList
-	if err := c.List(ctx, &servingLocations); err != nil {
-		return servingLocationResult{}, fmt.Errorf("failed to list serving locations: %w", err)
+	servingLocations, err := locations.ListServingLocations(ctx, c, r.LocationSource)
+	if err != nil {
+		return servingLocationResult{}, err
 	}
 
-	if len(servingLocations.Items) > 1 {
-		names := make([]string, 0, len(servingLocations.Items))
-		for _, servingLocation := range servingLocations.Items {
+	if len(servingLocations) > 1 {
+		names := make([]string, 0, len(servingLocations))
+		for _, servingLocation := range servingLocations {
 			names = append(names, servingLocation.Name)
 		}
 		slices.Sort(names)
@@ -669,7 +681,7 @@ func (r *WorkloadDeploymentReconciler) resolveLocation(
 		}, nil
 	}
 
-	if len(servingLocations.Items) == 0 {
+	if len(servingLocations) == 0 {
 		// Not an error: a cell that has not been identified yet still runs
 		// workloads, it just cannot tell them where they are.
 		log.FromContext(ctx).V(1).Info("cell has no serving location, waiting")
@@ -677,11 +689,11 @@ func (r *WorkloadDeploymentReconciler) resolveLocation(
 		return servingLocationResult{
 			reason: computev1alpha.WorkloadDeploymentReasonNoMatchingLocation,
 			message: fmt.Sprintf("This cell has not been told which location it serves; it needs the %s cluster label, or its location has not reached it yet",
-				locationsv1alpha1.ServingLocationTopologyLabel),
+				locations.ServingLocationTopologyLabel),
 		}, nil
 	}
 
-	servingLocation := &servingLocations.Items[0]
+	servingLocation := &servingLocations[0]
 
 	// A ServingLocation takes the name of the Location it was copied from, and
 	// Location is cluster scoped, so the reference carries a name and no
@@ -902,16 +914,19 @@ func (r *WorkloadDeploymentReconciler) SetupWithManager(mgr mcmanager.Manager, o
 		).
 		Owns(&computev1alpha.Instance{})
 
-	b = b.Watches(&locationsv1alpha1.ServingLocation{}, func(clusterName multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
-		return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []mcreconcile.Request {
-			return enqueueWorkloadDeploymentsForServingLocation(ctx, cl.GetClient(), clusterName)
-		})
-	})
-
 	// Only watch networking resources when the networking integration is enabled.
 	// On cells without network-services-operator these watches would log spurious
 	// errors for missing CRDs.
 	if r.NetworkingEnabled {
+		if err := locations.EnsureServingLocationKind(mgr.GetLocalManager().GetRESTMapper(), r.LocationSource); err != nil {
+			return err
+		}
+
+		servingLocationObject, err := locations.ServingLocationObject(r.LocationSource)
+		if err != nil {
+			return err
+		}
+
 		b = b.
 			// A claim becoming bound and allocated is what releases an instance's
 			// Network gate, and nothing else wakes this reconciler for it. The claim
@@ -920,6 +935,15 @@ func (r *WorkloadDeploymentReconciler) SetupWithManager(mgr mcmanager.Manager, o
 			Watches(&networkingv1alpha.NetworkInterfaceClaim{}, func(clusterName multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
 				return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []mcreconcile.Request {
 					return enqueueWorkloadDeploymentForClaim(ctx, cl.GetClient(), clusterName, o)
+				})
+			}).
+			// A deployment on a cell that does not yet know its own location waits
+			// without any other wake-up event, and the reconciler does not poll.
+			// Watching ServingLocations re-reconciles those deployments as soon as
+			// the cell learns where it is, so the deployment's location resolves.
+			Watches(servingLocationObject, func(clusterName multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+				return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []mcreconcile.Request {
+					return enqueueWorkloadDeploymentsForServingLocation(ctx, cl.GetClient(), clusterName)
 				})
 			})
 	}

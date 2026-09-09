@@ -82,6 +82,9 @@ func NewPlatformClient() (client.Client, error) {
 	}
 
 	scheme := runtime.NewScheme()
+	if err := locationsv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("registering locations scheme: %w", err)
+	}
 	if err := quotav1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("registering quota scheme: %w", err)
 	}

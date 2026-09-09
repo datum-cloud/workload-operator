@@ -31,8 +31,8 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
-	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
 const (
@@ -50,6 +50,11 @@ type WorkloadReconciler struct {
 	// on control planes without the integration, and engaging a watch against a
 	// missing kind wedges the manager.
 	NetworkingEnabled bool
+
+	// LocationSource selects the API group placement locations are read from.
+	// The zero value reads network services, which is what every deployment
+	// does today.
+	LocationSource locations.Source
 }
 
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloads,verbs=get;list;watch;create;update;patch;delete
@@ -448,23 +453,23 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 		existingDeployments.Insert(deployment.Name)
 	}
 
-	var locations locationsv1alpha1.LocationList
-	if err := upstreamClient.List(ctx, &locations); err != nil {
-		return nil, nil, fmt.Errorf("failed to list locations: %w", err)
+	placementLocations, err := locations.ListPlacementLocations(ctx, upstreamClient, r.LocationSource)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	if len(placementLocations) == 0 {
+		return nil, nil, fmt.Errorf("no locations are registered with the system")
+	}
+
+	readyLocations := locations.ReadyNames(placementLocations)
 
 	// Remember this: namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	for _, placement := range workload.Spec.Placements {
 		for _, locationRef := range placement.Locations {
-			var location *locationsv1alpha1.Location
-			for i := range locations.Items {
-				if locations.Items[i].Name == locationRef.Name {
-					location = &locations.Items[i]
-					break
-				}
-			}
-
-			if location == nil || !apimeta.IsStatusConditionTrue(location.Status.Conditions, locationsv1alpha1.LocationConditionReady) {
+			if !readyLocations.Has(locationRef.Name) {
+				// TODO(jreese) update status condition on placement if the
+				// location is unknown or not Ready.
 				continue
 			}
 
@@ -621,6 +626,11 @@ func workloadBlockingReasonPriority(reason string) int {
 		return 5
 	case computev1alpha.WorkloadReasonNetworkNotFound:
 		return 6
+	// This reason outranks every other blocker. No cell can accept the
+	// deployment, so nothing else can make progress, and the user resolves the
+	// condition by changing the workload spec.
+	case computev1alpha.WorkloadDeploymentReasonRuntimeClassNotServed:
+		return 7
 	default:
 		return 0
 	}

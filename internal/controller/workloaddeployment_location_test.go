@@ -20,6 +20,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 
@@ -88,7 +89,7 @@ func TestResolveLocation_ExactlyOneServingLocation(t *testing.T) {
 	deployment := newLocationTestDeployment("test-wd")
 	deployment.Spec.LocationRef = locationsv1alpha1.LocationReference{Name: locationName}
 
-	r := &WorkloadDeploymentReconciler{}
+	r := &WorkloadDeploymentReconciler{LocationSource: locations.SourceLocations}
 	result, err := r.resolveLocation(context.Background(), cl)
 	require.NoError(t, err)
 	result.evaluate(deployment)
@@ -110,7 +111,7 @@ func TestResolveLocation_NoServingLocation_IsNonGating(t *testing.T) {
 
 	deployment := newLocationTestDeployment("test-wd")
 
-	r := &WorkloadDeploymentReconciler{}
+	r := &WorkloadDeploymentReconciler{LocationSource: locations.SourceLocations}
 	result, err := r.resolveLocation(context.Background(), cl)
 	require.NoError(t, err, "an unidentified cell must not surface as an error")
 	result.evaluate(deployment)
@@ -139,7 +140,7 @@ func TestResolveLocation_MultipleServingLocations_RefusesToGuess(t *testing.T) {
 
 	deployment := newLocationTestDeployment("test-wd")
 
-	r := &WorkloadDeploymentReconciler{}
+	r := &WorkloadDeploymentReconciler{LocationSource: locations.SourceLocations}
 	result, err := r.resolveLocation(context.Background(), cl)
 	require.NoError(t, err)
 	result.evaluate(deployment)
@@ -165,7 +166,7 @@ func TestResolveLocation_CityCodeMismatch(t *testing.T) {
 
 	deployment := newLocationTestDeployment("test-wd")
 
-	r := &WorkloadDeploymentReconciler{}
+	r := &WorkloadDeploymentReconciler{LocationSource: locations.SourceLocations}
 	result, err := r.resolveLocation(context.Background(), cl)
 	require.NoError(t, err)
 	result.evaluate(deployment)
@@ -186,6 +187,7 @@ func newLocationTestWDReconciler(cl client.Client) *WorkloadDeploymentReconciler
 	r := &WorkloadDeploymentReconciler{
 		mgr:               newFakeMCManager(testCluster, newFakeCluster(cl)),
 		NetworkingEnabled: true,
+		LocationSource:    locations.SourceLocations,
 	}
 	feds := finalizer.NewFinalizers()
 	if err := feds.Register(workloadControllerFinalizer, r); err != nil {

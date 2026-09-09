@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,8 +16,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
+
+// newTestLocationBinding builds the projection a project control plane holds
+// today for a location it may place workloads at.
+func newTestLocationBinding(name, cityCode string) *networkingv1alpha.LocationBinding {
+	return &networkingv1alpha.LocationBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: networkingv1alpha.LocationBindingSpec{
+			LocationRef: corev1.LocalObjectReference{Name: name},
+			Topology:    map[string]string{networkingv1alpha.TopologyCityCodeKey: cityCode},
+		},
+	}
+}
 
 // makeWorkload builds a Workload with the given generation for use in
 // reconcileWorkloadStatus unit tests.
@@ -86,7 +100,7 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 
 	workload := &computev1alpha.Workload{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-workload",
+			Name:      rdTestWorkloadName,
 			Namespace: testDefaultNamespace,
 			UID:       types.UID("workload-uid"),
 		},
@@ -102,12 +116,7 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 			},
 		},
 	}
-	location := &locationsv1alpha1.Location{
-		ObjectMeta: metav1.ObjectMeta{Name: "dfw"},
-		Status: locationsv1alpha1.LocationStatus{
-			Conditions: []metav1.Condition{{Type: locationsv1alpha1.LocationConditionReady, Status: metav1.ConditionTrue}},
-		},
-	}
+	location := newTestLocationBinding("dfw", "DFW")
 
 	s := newNetworkingScheme()
 	require.NoError(t, locationsv1alpha1.AddToScheme(s))

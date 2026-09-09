@@ -264,20 +264,25 @@ func TestPropagationPolicyNameFor(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		location string
-		want     string
+		name         string
+		location     string
+		runtimeClass string
+		want         string
 	}{
-		{"LAX", "location-lax"},
-		{"lax", "location-lax"},
-		{"New York", "location-new-york"},
-		{"LOS ANGELES", "location-los-angeles"},
-		{"SEA", "location-sea"},
+		{"LAX", "LAX", "", "location-lax"},
+		{"lax", "lax", "", "location-lax"},
+		{"New York", "New York", "", "location-new-york"},
+		{"LOS ANGELES", "LOS ANGELES", "", "location-los-angeles"},
+		{"SEA", "SEA", "", "location-sea"},
+		{"us-west-2", testFederatorLocation, "", "location-us-west-2"},
+		{"us-west-2 with a class", testFederatorLocation, testClassAzurite, "location-us-west-2-class-azurite"},
+		{"us-west-2 with another class", testFederatorLocation, testClassBasalt, "location-us-west-2-class-basalt"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.location, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := propagationPolicyNameFor(tt.location)
+			got := propagationPolicyNameFor(tt.location, tt.runtimeClass)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -348,7 +353,7 @@ func TestWorkloadDeploymentFederator_AddsFinalizerOnFirstSeen(t *testing.T) {
 
 // TestWorkloadDeploymentFederator_FederatesToKarmada verifies that a
 // WorkloadDeployment with the finalizer already set is fully federated:
-// the Karmada namespace, WorkloadDeployment (with city-code label), and
+// the Karmada namespace, WorkloadDeployment (with location label), and
 // PropagationPolicy are all created.
 func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 	t.Parallel()
@@ -369,7 +374,7 @@ func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 	err = karmadaClient.Get(ctx, types.NamespacedName{Name: testKarmadaNSStr}, &karmadaNS)
 	require.NoError(t, err, "Karmada namespace %q should exist", testKarmadaNSStr)
 
-	// Karmada WorkloadDeployment must exist with the city-code label.
+	// Karmada WorkloadDeployment must exist with the location label.
 	var karmadaWD computev1alpha.WorkloadDeployment
 	err = karmadaClient.Get(ctx, types.NamespacedName{
 		Name:      testWDName,
@@ -377,12 +382,12 @@ func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 	}, &karmadaWD)
 	require.NoError(t, err, "Karmada WorkloadDeployment should exist")
 	assert.Equal(t, testFederatorLocation, karmadaWD.Labels[locationLabel],
-		"city-code label should be set on Karmada WD")
+		"location label should be set on Karmada WD")
 	assert.Equal(t, testFederatorLocation, karmadaWD.Spec.LocationRef.Name,
-		"spec.cityCode should be copied from project WD")
+		"spec.locationRef should be copied from project WD")
 
-	// PropagationPolicy for the city code must exist.
-	ppName := propagationPolicyNameFor(testFederatorLocation)
+	// PropagationPolicy for the location must exist.
+	ppName := propagationPolicyNameFor(testFederatorLocation, "")
 	var pp karmadapolicyv1alpha1.PropagationPolicy
 	err = karmadaClient.Get(ctx, types.NamespacedName{
 		Name:      ppName,
@@ -390,7 +395,7 @@ func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 	}, &pp)
 	require.NoError(t, err, "PropagationPolicy %q should exist", ppName)
 
-	// The PP must have three selectors: WorkloadDeployment (city-code), ConfigMap
+	// The PP must have three selectors: WorkloadDeployment (location), ConfigMap
 	// (referenced-data), and Secret (referenced-data).
 	require.Len(t, pp.Spec.ResourceSelectors, 3)
 
@@ -412,7 +417,7 @@ func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 	require.NotNil(t, secretSel.LabelSelector)
 	assert.Equal(t, computev1alpha.ReferencedDataLabelValue, secretSel.LabelSelector.MatchLabels[computev1alpha.ReferencedDataLabel])
 
-	// The PP cluster affinity must target clusters carrying the same city-code.
+	// The PP cluster affinity must target clusters carrying the same location.
 	require.NotNil(t, pp.Spec.Placement.ClusterAffinity)
 	require.NotNil(t, pp.Spec.Placement.ClusterAffinity.LabelSelector)
 	assert.Equal(t, testFederatorLocation,
@@ -424,7 +429,7 @@ func TestWorkloadDeploymentFederator_FederatesToKarmada(t *testing.T) {
 func TestWorkloadDeploymentFederator_Finalization(t *testing.T) {
 	t.Parallel()
 
-	ppName := propagationPolicyNameFor(testFederatorLocation)
+	ppName := propagationPolicyNameFor(testFederatorLocation, "")
 
 	tests := []struct {
 		name string
@@ -433,14 +438,14 @@ func TestWorkloadDeploymentFederator_Finalization(t *testing.T) {
 		wantPPGone   bool
 	}{
 		{
-			name:         "last WD for city — PropagationPolicy removed",
+			name:         "last WD for location — PropagationPolicy removed",
 			karmadaExtra: nil,
 			wantPPGone:   true,
 		},
 		{
-			name: "other WD for same city remains — PropagationPolicy kept",
+			name: "other WD for same location remains — PropagationPolicy kept",
 			karmadaExtra: []client.Object{
-				// A sibling WD in the same Karmada namespace with the same city-code.
+				// A sibling WD in the same Karmada namespace with the same location.
 				&computev1alpha.WorkloadDeployment{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "other-deployment",
@@ -548,7 +553,7 @@ func TestCleanupPropagationPolicyIfUnused_EmptyLocation(t *testing.T) {
 	karmadaClient := newKarmadaFakeClient()
 	r := newTestFederator(projectClient, karmadaClient)
 
-	err := r.cleanupPropagationPolicyIfUnused(context.Background(), testKarmadaNSStr, "")
+	err := r.cleanupPropagationPolicyIfUnused(context.Background(), testKarmadaNSStr, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "location name is empty")
 }
@@ -556,7 +561,7 @@ func TestCleanupPropagationPolicyIfUnused_EmptyLocation(t *testing.T) {
 // TestWorkloadDeploymentFederator_PropagationPolicyHasReferencedDataSelectors
 // verifies that the PropagationPolicy always includes ConfigMap and Secret
 // selectors for the referenced-data label in addition to the WorkloadDeployment
-// city-code selector. This is the always-on companion co-propagation.
+// location selector. This is the always-on companion co-propagation.
 func TestWorkloadDeploymentFederator_PropagationPolicyHasReferencedDataSelectors(t *testing.T) {
 	t.Parallel()
 
@@ -568,7 +573,7 @@ func TestWorkloadDeploymentFederator_PropagationPolicyHasReferencedDataSelectors
 	_, err := r.Reconcile(context.Background(), reconcileRequest())
 	require.NoError(t, err)
 
-	ppName := propagationPolicyNameFor(testFederatorLocation)
+	ppName := propagationPolicyNameFor(testFederatorLocation, "")
 	var pp karmadapolicyv1alpha1.PropagationPolicy
 	require.NoError(t, karmadaClient.Get(context.Background(), types.NamespacedName{
 		Name:      ppName,
