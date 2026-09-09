@@ -79,6 +79,12 @@ var _ admission.Validator[*computev1alpha.Workload] = &workloadWebhook{}
 
 // Default implements admission.Defaulter so a mutating webhook will be registered for the type.
 func (r *workloadWebhook) Default(ctx context.Context, workload *computev1alpha.Workload) error {
+	// A manifest written before placement moved to locations still names
+	// city codes. It is rewritten here so what is stored is what the
+	// controller places by, and so the stored object never carries the
+	// deprecated field.
+	workload.MigrateCityCodes()
+
 	// With the gate off there is only one runtime class, so the field stays
 	// empty rather than recording a class name the platform does not yet honor.
 	if features.FeatureGate.Enabled(features.RuntimeClasses) {

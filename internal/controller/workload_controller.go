@@ -110,6 +110,21 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 	logger.Info("reconciling workload")
 	defer logger.Info("reconcile complete")
 
+	// A workload stored before placement moved to locations still names city
+	// codes. It is rewritten to the equivalent selector and written back, and
+	// nothing is placed from it until that write succeeds: deriving
+	// deployments from the old spec would resolve to nothing and tear down
+	// what is running. The write passes through admission, which rejects a
+	// city with no placeable location; the workload then keeps its existing
+	// deployments and the error is retried.
+	if workload.MigrateCityCodes() {
+		logger.Info("migrating placement city codes to a location selector")
+		if err := cl.GetClient().Update(ctx, &workload); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to migrate placement city codes: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// TODO(jreese) perform extra validation on the workload now that it's been
 	// created.
 	//

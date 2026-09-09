@@ -171,7 +171,7 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 		locationSelector = parsed
 	}
 	if len(opts.cities) > 0 {
-		locationSelector = citySelector(opts.cities)
+		locationSelector = computev1alpha.CityCodeSelector(opts.cities)
 	}
 	instanceType := opts.instanceType
 	if instanceType == "" {
@@ -514,27 +514,13 @@ func describePlacementLocations(p computev1alpha.WorkloadPlacement) string {
 	if p.LocationSelector != nil {
 		return fmt.Sprintf("selector=[%s]", metav1.FormatLabelSelector(p.LocationSelector))
 	}
+	if len(p.CityCodes) > 0 {
+		// Stored before placement moved to locations and not yet rewritten.
+		return fmt.Sprintf("cities=[%s]", strings.Join(p.CityCodes, ", "))
+	}
 	names := make([]string, 0, len(p.Locations))
 	for _, ref := range p.Locations {
 		names = append(names, ref.Name)
 	}
 	return fmt.Sprintf("locations=[%s]", strings.Join(names, ", "))
-}
-
-// citySelector is the selector --city stands for: every location whose
-// topology places it in one of the given cities. One city is a plain
-// equality; several become an In expression.
-func citySelector(cities []string) *metav1.LabelSelector {
-	if len(cities) == 1 {
-		return &metav1.LabelSelector{
-			MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: cities[0]},
-		}
-	}
-	return &metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{{
-			Key:      locationsv1alpha1.TopologyCityCodeKey,
-			Operator: metav1.LabelSelectorOpIn,
-			Values:   cities,
-		}},
-	}
 }

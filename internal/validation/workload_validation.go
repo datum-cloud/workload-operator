@@ -137,6 +137,13 @@ func validateWorkloadPlacement(placement computev1alpha.WorkloadPlacement, field
 	locationsPath := fieldPath.Child("locations")
 	selectorPath := fieldPath.Child("locationSelector")
 	switch {
+	case len(placement.CityCodes) > 0:
+		// Admission rewrites a lone cityCodes into a locationSelector before
+		// validation runs, so reaching this means it was set together with
+		// locations or a selector, or defaulting was bypassed. Either way the
+		// author has to say which they meant.
+		allErrs = append(allErrs, field.Forbidden(fieldPath.Child("cityCodes"),
+			"deprecated: place with locations or a locationSelector on "+locationsv1alpha1.TopologyCityCodeKey+"; a placement that only names city codes is rewritten on admission"))
 	case len(placement.Locations) == 0 && placement.LocationSelector == nil:
 		allErrs = append(allErrs, field.Required(locationsPath, "one of locations or locationSelector must be set"))
 	case len(placement.Locations) > 0 && placement.LocationSelector != nil:

@@ -69,6 +69,8 @@ interface RawWorkloadPlacement {
   name: string;
   locations?: Array<{ name: string }>;
   locationSelector?: RawLabelSelector;
+  /** Deprecated: stored before placement moved to locations and not yet rewritten. */
+  cityCodes?: string[];
   scaleSettings?: { minReplicas?: number; maxReplicas?: number };
 }
 
@@ -261,7 +263,11 @@ function toPlacementRegions(
     return {
       name: p.name,
       locations: placementLocations(p, status),
-      locationSelector: p.locationSelector ? formatLabelSelector(p.locationSelector) : undefined,
+      locationSelector: p.locationSelector
+        ? formatLabelSelector(p.locationSelector)
+        : p.cityCodes && p.cityCodes.length > 0
+          ? `topology.datum.net/city-code in (${p.cityCodes.join(',')})`
+          : undefined,
       readyReplicas: ready,
       desiredReplicas: desired,
       health,

@@ -21,6 +21,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 	"go.miloapis.com/milo/pkg/downstreamclient"
 )
@@ -766,4 +767,87 @@ func TestWorkloadDeploymentFederator_FinalizeHoldsWhenUnresolvable(t *testing.T)
 	ctx := mccontext.WithCluster(context.Background(), testCluster)
 	_, err := r.Finalize(ctx, wd)
 	require.Error(t, err, "an unresolvable hub namespace must hold the finalizer")
+}
+
+// TestWorkloadDeploymentFederator_FinalizesLegacyDeployment covers deleting a
+// deployment stored before placement moved to locations. It has no location
+// to key a PropagationPolicy by; the city it was routed by is read off its
+// hub copy, and the city-keyed policies from that era are removed once no hub
+// deployment routed by the city remains. Policies keyed by location are not
+// touched.
+func TestWorkloadDeploymentFederator_FinalizesLegacyDeployment(t *testing.T) {
+	t.Parallel()
+
+	const legacyCity = "LAX"
+	withoutLocation := func(wd *computev1alpha.WorkloadDeployment) {
+		wd.Spec.LocationRef = locationsv1alpha1.LocationReference{}
+	}
+
+	tests := []struct {
+		name          string
+		siblingLabels map[string]string
+		wantCityPPs   bool
+	}{
+		{
+			name:        "last legacy deployment for the city removes its policies",
+			wantCityPPs: false,
+		},
+		{
+			name:          "another legacy deployment routed by the city keeps them",
+			siblingLabels: map[string]string{networkingv1alpha.TopologyCityCodeKey: legacyCity},
+			wantCityPPs:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			wd := testWorkloadDeployment(withFinalizer, withDeletionTimestamp, withoutLocation)
+			projectClient := newProjectFakeClient(testProjectNamespace(), wd)
+
+			hubCopy := &computev1alpha.WorkloadDeployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testWDName,
+					Namespace: testKarmadaNSStr,
+					Labels:    map[string]string{networkingv1alpha.TopologyCityCodeKey: legacyCity},
+				},
+			}
+			policy := func(name string) *karmadapolicyv1alpha1.PropagationPolicy {
+				return &karmadapolicyv1alpha1.PropagationPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testKarmadaNSStr}}
+			}
+			karmadaObjs := []client.Object{
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testKarmadaNSStr}},
+				hubCopy,
+				policy("city-lax"),
+				policy("city-lax-class-basalt"),
+				policy("city-sea"),
+				policy(propagationPolicyNameFor(testFederatorLocation, "")),
+			}
+			if tt.siblingLabels != nil {
+				karmadaObjs = append(karmadaObjs, &computev1alpha.WorkloadDeployment{
+					ObjectMeta: metav1.ObjectMeta{Name: "legacy-sibling", Namespace: testKarmadaNSStr, Labels: tt.siblingLabels},
+				})
+			}
+			karmadaClient := newKarmadaFakeClient(karmadaObjs...)
+
+			r := newTestFederator(projectClient, karmadaClient)
+			_, err := r.Reconcile(context.Background(), reconcileRequest())
+			require.NoError(t, err, "a deployment without a location must still finalize")
+
+			ctx := context.Background()
+			var gone computev1alpha.WorkloadDeployment
+			err = karmadaClient.Get(ctx, types.NamespacedName{Name: testWDName, Namespace: testKarmadaNSStr}, &gone)
+			assert.True(t, apierrors.IsNotFound(err), "the hub copy is deleted")
+
+			exists := func(name string) bool {
+				var pp karmadapolicyv1alpha1.PropagationPolicy
+				return karmadaClient.Get(ctx, types.NamespacedName{Name: name, Namespace: testKarmadaNSStr}, &pp) == nil
+			}
+			assert.Equal(t, tt.wantCityPPs, exists("city-lax"))
+			assert.Equal(t, tt.wantCityPPs, exists("city-lax-class-basalt"))
+			assert.True(t, exists("city-sea"), "another city's policies are not touched")
+			assert.True(t, exists(propagationPolicyNameFor(testFederatorLocation, "")), "location-keyed policies are not touched")
+		})
+	}
 }

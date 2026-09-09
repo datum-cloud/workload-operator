@@ -1361,6 +1361,11 @@ func (in *WorkloadPlacement) DeepCopyInto(out *WorkloadPlacement) {
 		*out = new(metav1.LabelSelector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.CityCodes != nil {
+		in, out := &in.CityCodes, &out.CityCodes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	in.ScaleSettings.DeepCopyInto(&out.ScaleSettings)
 }
 

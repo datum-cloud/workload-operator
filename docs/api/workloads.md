@@ -133,6 +133,19 @@ will live in, such as in a city, or region.<br/>
         </td>
         <td>true</td>
       </tr><tr>
+        <td><b>cityCodes</b></td>
+        <td>[]string</td>
+        <td>
+          The city codes this placement was written against before placement
+moved to locations. This field is deprecated and kept only so workloads
+stored before that change keep running: admission and the workload
+controller rewrite it into a locationSelector on
+topology.datum.net/city-code, which places at every location in those
+cities, and clear it. New workloads set locations or locationSelector
+instead.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
         <td><b><a href="#workloadspecplacementsindexlocationselector">locationSelector</a></b></td>
         <td>object</td>
         <td>

@@ -131,7 +131,7 @@ type WorkloadList struct {
 	Items           []Workload `json:"items"`
 }
 
-// +kubebuilder:validation:XValidation:message="exactly one of locations or locationSelector must be set",rule="has(self.locations) != has(self.locationSelector)"
+// +kubebuilder:validation:XValidation:message="exactly one of locations, locationSelector, or cityCodes must be set",rule="(has(self.locations) ? 1 : 0) + (has(self.locationSelector) ? 1 : 0) + (has(self.cityCodes) ? 1 : 0) == 1"
 type WorkloadPlacement struct {
 	// The name of the placement
 	//
@@ -155,6 +155,18 @@ type WorkloadPlacement struct {
 	//
 	// +kubebuilder:validation:Optional
 	LocationSelector *metav1.LabelSelector `json:"locationSelector,omitempty"`
+
+	// The city codes this placement was written against before placement
+	// moved to locations. This field is deprecated and kept only so workloads
+	// stored before that change keep running: admission and the workload
+	// controller rewrite it into a locationSelector on
+	// topology.datum.net/city-code, which places at every location in those
+	// cities, and clear it. New workloads set locations or locationSelector
+	// instead.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinItems=1
+	CityCodes []string `json:"cityCodes,omitempty"`
 
 	// Scale settings such as minimum and maximum replica counts.
 	//

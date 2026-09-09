@@ -240,16 +240,75 @@ func (r *WorkloadDeploymentFederator) Finalize(ctx context.Context, obj client.O
 			Namespace: downstreamNS,
 		},
 	}
+
+	// A deployment from before placement moved to locations has no location
+	// to key its PropagationPolicy by; the city it was routed by survives only
+	// as a label on its hub copy, so it is read before that copy goes.
+	legacyCity := ""
+	if deployment.Spec.LocationRef.Name == "" {
+		if err := r.FederationClient.Get(ctx, client.ObjectKeyFromObject(kd), kd); client.IgnoreNotFound(err) != nil {
+			return finalizer.Result{}, fmt.Errorf("failed to read downstream deployment %s/%s: %w", downstreamNS, deployment.Name, err)
+		}
+		legacyCity = kd.Labels[networkingv1alpha.TopologyCityCodeKey]
+	}
+
 	if err := r.FederationClient.Delete(ctx, kd); client.IgnoreNotFound(err) != nil {
 		return finalizer.Result{}, fmt.Errorf("failed to delete downstream deployment %s/%s: %w", downstreamNS, deployment.Name, err)
 	}
 	logger.Info("deleted downstream WorkloadDeployment", "downstreamNamespace", downstreamNS)
+
+	if deployment.Spec.LocationRef.Name == "" {
+		return finalizer.Result{}, r.cleanupLegacyPropagationPolicies(ctx, downstreamNS, legacyCity)
+	}
 
 	if err := r.cleanupPropagationPolicyIfUnused(ctx, downstreamNS, deployment.Spec.LocationRef.Name, r.propagationRuntimeClass(deployment)); err != nil {
 		return finalizer.Result{}, err
 	}
 
 	return finalizer.Result{}, nil
+}
+
+// cleanupLegacyPropagationPolicies removes the PropagationPolicies a
+// pre-location federator keyed by city, once no hub deployment routed by that
+// city remains. Those policies were named city-<code> and
+// city-<code>-class-<class>, and selected on the topology.datum.net/city-code
+// label, which is how the remaining users are counted. A deployment whose hub
+// copy is already gone leaves no city to clean up by, and is logged.
+func (r *WorkloadDeploymentFederator) cleanupLegacyPropagationPolicies(ctx context.Context, downstreamNS, city string) error {
+	logger := log.FromContext(ctx)
+	if city == "" {
+		logger.Info("legacy deployment carries no city on its hub copy; leaving its PropagationPolicy for a later cleanup", "downstreamNamespace", downstreamNS)
+		return nil
+	}
+
+	var remaining computev1alpha.WorkloadDeploymentList
+	if err := r.FederationClient.List(ctx, &remaining,
+		client.InNamespace(downstreamNS),
+		client.MatchingLabels{networkingv1alpha.TopologyCityCodeKey: city},
+	); err != nil {
+		return fmt.Errorf("failed to list remaining legacy downstream deployments for city %q: %w", city, err)
+	}
+	if len(remaining.Items) > 0 {
+		return nil
+	}
+
+	var policies karmadapolicyv1alpha1.PropagationPolicyList
+	if err := r.FederationClient.List(ctx, &policies, client.InNamespace(downstreamNS)); err != nil {
+		return fmt.Errorf("failed to list PropagationPolicies in %s: %w", downstreamNS, err)
+	}
+
+	prefix := "city-" + sanitizePolicyNameSegment(city)
+	for i := range policies.Items {
+		policy := &policies.Items[i]
+		if policy.Name != prefix && !strings.HasPrefix(policy.Name, prefix+"-class-") {
+			continue
+		}
+		if err := r.FederationClient.Delete(ctx, policy); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("failed to delete legacy PropagationPolicy %s/%s: %w", downstreamNS, policy.Name, err)
+		}
+		logger.Info("deleted legacy PropagationPolicy (no more deployments for city)", "policy", policy.Name, "city", city, "downstreamNamespace", downstreamNS)
+	}
+	return nil
 }
 
 // recordFederationNamespace stamps the resolved hub namespace onto the project

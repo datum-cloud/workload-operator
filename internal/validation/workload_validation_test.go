@@ -121,6 +121,17 @@ func TestValidateWorkloads(t *testing.T) {
 				field.Required(field.NewPath("spec.placements[0].locationSelector.matchExpressions[0].values"), ""),
 			},
 		},
+		"city codes are deprecated": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].CityCodes = []string{testCityCodeDFW}
+				},
+			),
+			expectedErrors: field.ErrorList{
+				field.Forbidden(field.NewPath("spec.placements[0].cityCodes"), ""),
+			},
+		},
 		"location selector together with locations": {
 			workload: MakeSandboxWorkload(
 				"test",

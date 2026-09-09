@@ -478,6 +478,10 @@ func placementLocationsSummary(p computev1alpha.WorkloadPlacement) string {
 	if p.LocationSelector != nil {
 		return "selector: " + metav1.FormatLabelSelector(p.LocationSelector)
 	}
+	if len(p.CityCodes) > 0 {
+		// Stored before placement moved to locations and not yet rewritten.
+		return "cities: " + strings.Join(p.CityCodes, ", ")
+	}
 	names := make([]string, 0, len(p.Locations))
 	for _, ref := range p.Locations {
 		names = append(names, ref.Name)
