@@ -108,7 +108,7 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 			Placements: []computev1alpha.WorkloadPlacement{
 				{
 					Name:      testDefaultPlacement,
-					Locations: []locationsv1alpha1.LocationReference{{Name: "dfw"}},
+					Locations: []locationsv1alpha1.LocationReference{{Name: testLocationName}},
 					ScaleSettings: computev1alpha.HorizontalScaleSettings{
 						MinReplicas: 2,
 					},
@@ -116,7 +116,7 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 			},
 		},
 	}
-	location := newTestLocationBinding("dfw", "DFW")
+	location := newTestLocationBinding(testLocationName, "DFW")
 
 	s := newNetworkingScheme()
 	require.NoError(t, locationsv1alpha1.AddToScheme(s))
@@ -133,8 +133,8 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 	require.Len(t, desired, 1)
 	require.NotNil(t, desired[0].Spec.Replicas)
 	assert.Equal(t, int32(2), *desired[0].Spec.Replicas)
-	assert.Equal(t, "dfw", desired[0].Spec.LocationRef.Name)
-	assert.Equal(t, "dfw", desired[0].Labels[computev1alpha.LocationLabel])
+	assert.Equal(t, testLocationName, desired[0].Spec.LocationRef.Name)
+	assert.Equal(t, testLocationName, desired[0].Labels[computev1alpha.LocationLabel])
 }
 
 // TestReconcileWorkloadStatus_AllDeploymentsSameReason verifies that when all
@@ -343,4 +343,150 @@ func TestWorkloadBlockingReasonPriority(t *testing.T) {
 				"unexpected priority for reason %q", tt.reason)
 		})
 	}
+}
+
+// TestGetDeploymentsForWorkload_LocationSelector verifies that a placement
+// selecting locations by topology gets one deployment per Ready location the
+// selector matches, in name order, and nothing for locations it excludes.
+func TestGetDeploymentsForWorkload_LocationSelector(t *testing.T) {
+	t.Parallel()
+
+	workload := &computev1alpha.Workload{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rdTestWorkloadName,
+			Namespace: testDefaultNamespace,
+			UID:       types.UID("workload-uid"),
+		},
+		Spec: computev1alpha.WorkloadSpec{
+			Placements: []computev1alpha.WorkloadPlacement{
+				{
+					Name: testDefaultPlacement,
+					LocationSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{networkingv1alpha.TopologyCityCodeKey: "DFW"},
+					},
+					ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
+				},
+			},
+		},
+	}
+
+	s := newNetworkingScheme()
+	cl := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(
+			newTestLocationBinding("dfw-b", "DFW"),
+			newTestLocationBinding("dfw-a", "DFW"),
+			newTestLocationBinding(testOtherLocationName, "ORD"),
+		).
+		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
+		Build()
+	r := &WorkloadReconciler{}
+
+	desired, orphaned, err := r.getDeploymentsForWorkload(context.Background(), cl, workload)
+	require.NoError(t, err)
+	require.Empty(t, orphaned)
+	require.Len(t, desired, 2)
+	assert.Equal(t, "dfw-a", desired[0].Spec.LocationRef.Name)
+	assert.Equal(t, "dfw-b", desired[1].Spec.LocationRef.Name)
+	assert.Equal(t, rdTestWorkloadName+"-"+testDefaultPlacement+"-dfw-a", desired[0].Name)
+	assert.Equal(t, "dfw-a", desired[0].Labels[computev1alpha.LocationLabel])
+}
+
+// TestGetDeploymentsForWorkload_LocationSelectorFollowsLocations verifies the
+// dynamic half of a selector: a deployment at a location the selector no
+// longer matches is orphaned, so the placement follows the fleet.
+func TestGetDeploymentsForWorkload_LocationSelectorFollowsLocations(t *testing.T) {
+	t.Parallel()
+
+	workload := &computev1alpha.Workload{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rdTestWorkloadName,
+			Namespace: testDefaultNamespace,
+			UID:       types.UID("workload-uid"),
+		},
+		Spec: computev1alpha.WorkloadSpec{
+			Placements: []computev1alpha.WorkloadPlacement{
+				{
+					Name: testDefaultPlacement,
+					LocationSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{networkingv1alpha.TopologyCityCodeKey: "DFW"},
+					},
+					ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
+				},
+			},
+		},
+	}
+	// The ord deployment was created when the location matched; the binding
+	// has since changed city.
+	stale := &computev1alpha.WorkloadDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rdTestWorkloadName + "-" + testDefaultPlacement + "-ord",
+			Namespace: testDefaultNamespace,
+			Labels:    map[string]string{computev1alpha.WorkloadUIDLabel: "workload-uid"},
+		},
+		Spec: computev1alpha.WorkloadDeploymentSpec{
+			WorkloadRef:   computev1alpha.WorkloadReference{Name: rdTestWorkloadName, UID: types.UID("workload-uid")},
+			PlacementName: testDefaultPlacement,
+			LocationRef:   locationsv1alpha1.LocationReference{Name: testOtherLocationName},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newNetworkingScheme()).
+		WithObjects(newTestLocationBinding(testLocationName, "DFW"), newTestLocationBinding(testOtherLocationName, "ORD"), stale).
+		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
+		Build()
+	r := &WorkloadReconciler{}
+
+	desired, orphaned, err := r.getDeploymentsForWorkload(context.Background(), cl, workload)
+	require.NoError(t, err)
+	require.Len(t, desired, 1)
+	assert.Equal(t, testLocationName, desired[0].Spec.LocationRef.Name)
+	require.Len(t, orphaned, 1)
+	assert.Equal(t, stale.Name, orphaned[0].Name)
+}
+
+// TestReconcileWorkloadStatus_PlacementWithNoLocations verifies that a
+// placement in the spec that resolved to nothing is still reported, with a
+// reason that says so, and that the reason reaches the workload condition.
+func TestReconcileWorkloadStatus_PlacementWithNoLocations(t *testing.T) {
+	workload := makeWorkload(1)
+	workload.Spec.Placements = []computev1alpha.WorkloadPlacement{{
+		Name: testPlacementA,
+		LocationSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{networkingv1alpha.TopologyCityCodeKey: "LHR"},
+		},
+	}}
+
+	cond := runReconcileWorkloadStatus(t, workload, map[string][]computev1alpha.WorkloadDeployment{})
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, computev1alpha.WorkloadReasonNoMatchingLocations, cond.Reason)
+
+	require.Len(t, workload.Status.Placements, 1)
+	placement := workload.Status.Placements[0]
+	assert.Equal(t, testPlacementA, placement.Name)
+	assert.Empty(t, placement.Locations)
+	placementCond := apimeta.FindStatusCondition(placement.Conditions, workloadConditionTypeAvailable)
+	require.NotNil(t, placementCond)
+	assert.Equal(t, computev1alpha.WorkloadReasonNoMatchingLocations, placementCond.Reason)
+}
+
+// TestReconcileWorkloadStatus_ReportsResolvedLocations verifies the placement
+// status names the locations its deployments run at, in name order.
+func TestReconcileWorkloadStatus_ReportsResolvedLocations(t *testing.T) {
+	workload := makeWorkload(1)
+	wdB := makeWDWithAvailCond("wd-b", metav1.ConditionTrue, "AvailableDeploymentFound", "")
+	wdB.Spec.LocationRef = locationsv1alpha1.LocationReference{Name: testOtherLocationName}
+	wdA := makeWDWithAvailCond("wd-a", metav1.ConditionTrue, "AvailableDeploymentFound", "")
+	wdA.Spec.LocationRef = locationsv1alpha1.LocationReference{Name: testLocationName}
+
+	cond := runReconcileWorkloadStatus(t, workload, map[string][]computev1alpha.WorkloadDeployment{
+		testPlacementA: {wdB, wdA},
+	})
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionTrue, cond.Status)
+
+	require.Len(t, workload.Status.Placements, 1)
+	assert.Equal(t, []locationsv1alpha1.LocationReference{{Name: testLocationName}, {Name: testOtherLocationName}}, workload.Status.Placements[0].Locations)
 }

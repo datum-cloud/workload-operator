@@ -63,6 +63,7 @@ function statusLabel(workload: Workload): string {
 
 function regionLabel(region: WorkloadPlacementRegion): string {
   if (region.locations.length > 0) return region.locations.join(", ");
+  if (region.locationSelector) return region.locationSelector;
   return region.name;
 }
 

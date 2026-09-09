@@ -11,11 +11,15 @@ package locations
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -171,6 +175,85 @@ func ListServingLocations(ctx context.Context, c client.Client, source Source) (
 		})
 	}
 	return found, nil
+}
+
+// Select returns the Ready locations whose topology matches the selector,
+// sorted by name so callers derive a stable set of deployments from it.
+//
+// An empty selector is an error rather than a match for every location. The
+// webhook rejects one, so reaching this with one means the stored object was
+// not admitted through it.
+func Select(found []PlacementLocation, selector *metav1.LabelSelector) ([]PlacementLocation, error) {
+	if selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0) {
+		return nil, errors.New("location selector is empty")
+	}
+
+	sel, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid location selector: %w", err)
+	}
+
+	var matched []PlacementLocation
+	for _, location := range found {
+		if location.Ready && sel.Matches(labels.Set(location.Topology)) {
+			matched = append(matched, location)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Name < matched[j].Name })
+	return matched, nil
+}
+
+// PlacementLocationObject returns the object a controller watches to learn
+// that the locations a project may place workloads at have changed.
+func PlacementLocationObject(source Source) (client.Object, error) {
+	resolved, err := source.Resolve()
+	if err != nil {
+		return nil, err
+	}
+
+	if resolved == SourceNetworkServices {
+		return &networkingv1alpha.LocationBinding{}, nil
+	}
+	return &locationsv1alpha1.Location{}, nil
+}
+
+// PlacementLocationGVK returns the kind a controller watches to learn that the
+// locations a project may place workloads at have changed.
+func PlacementLocationGVK(source Source) (schema.GroupVersionKind, error) {
+	resolved, err := source.Resolve()
+	if err != nil {
+		return schema.GroupVersionKind{}, err
+	}
+
+	if resolved == SourceNetworkServices {
+		return networkingv1alpha.GroupVersion.WithKind("LocationBinding"), nil
+	}
+	return locationsv1alpha1.GroupVersion.WithKind("Location"), nil
+}
+
+// ServesPlacementLocationKind reports whether the control plane behind the
+// mapper serves the kind the source watches for placement locations.
+//
+// Unlike EnsureServingLocationKind this answers rather than refuses. A cell
+// serves the deployments it is asked about, so a missing serving location kind
+// there is a misconfiguration worth failing on. Placement locations are read
+// from many project control planes engaged one at a time, and a control plane
+// that does not carry the kind is skipped rather than taking the whole manager
+// down with it.
+func ServesPlacementLocationKind(mapper apimeta.RESTMapper, source Source) (bool, error) {
+	gvk, err := PlacementLocationGVK(source)
+	if err != nil {
+		return false, err
+	}
+
+	if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		if kindNotInstalled(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to determine whether %s is served: %w", gvk, err)
+	}
+
+	return true, nil
 }
 
 // ServingLocationObject returns the object a controller watches to learn that

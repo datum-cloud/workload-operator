@@ -93,7 +93,7 @@ func projTestWorkloadDeployment() *computev1alpha.WorkloadDeployment {
 			UID:       projTestWDUID,
 		},
 		Spec: computev1alpha.WorkloadDeploymentSpec{
-			LocationRef:   locationsv1alpha1.LocationReference{Name: "us-west-1"},
+			LocationRef:   locationsv1alpha1.LocationReference{Name: testWestLocationName},
 			PlacementName: testDefaultPlacement,
 			WorkloadRef:   computev1alpha.WorkloadReference{Name: "my-workload"},
 			ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},

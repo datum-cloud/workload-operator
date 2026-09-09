@@ -90,7 +90,7 @@ user-actionable
   Something in the workload the customer wrote, or in their project's setup.
   They can fix it. Examples: ImageUnavailable, InstanceCrashing,
   ConfigurationError, QuotaExceeded, SourceNotFound, SourceTooLarge,
-  NetworkNotFound.
+  NetworkNotFound, NoMatchingLocations.
 
 platform fault
   Datum's to fix. No change to the workload will help, and suggesting one wastes

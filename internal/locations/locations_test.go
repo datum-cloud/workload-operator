@@ -23,6 +23,10 @@ import (
 const (
 	testCityCode      = "DFW"
 	testOtherCityCode = "ORD"
+
+	testLocationORD  = "ord"
+	testLocationDFWA = "dfw-a"
+	testLocationDFWB = "dfw-b"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {
@@ -95,7 +99,7 @@ func TestListPlacementLocations_NetworkServices(t *testing.T) {
 		WithScheme(testScheme(t)).
 		WithObjects(
 			newBinding("dfw", testCityCode),
-			newBinding("ord", testOtherCityCode),
+			newBinding(testLocationORD, testOtherCityCode),
 			// A binding with no city code contributes no placement city.
 			&networkingv1alpha.LocationBinding{ObjectMeta: metav1.ObjectMeta{Name: "nowhere"}},
 			// The locations service must not be read when network services is
@@ -117,7 +121,7 @@ func TestListPlacementLocations_Locations(t *testing.T) {
 		WithScheme(testScheme(t)).
 		WithObjects(
 			newLocation("dfw", testCityCode),
-			newLocation("ord", testOtherCityCode),
+			newLocation(testLocationORD, testOtherCityCode),
 			// The network services source must not be read when the locations
 			// service is selected.
 			newBinding("lhr", "LHR"),
@@ -270,5 +274,104 @@ func TestServingLocationGVK(t *testing.T) {
 	assert.Equal(t, "servinglocations.locations.miloapis.com", crdName(gvk))
 
 	_, err = ServingLocationGVK("Nonsense")
+	require.Error(t, err)
+}
+
+// TestSelect covers selection over topology: a selector matches Ready
+// locations by their topology, the result is ordered by name, and an empty or
+// malformed selector is refused rather than matching everything.
+func TestSelect(t *testing.T) {
+	t.Parallel()
+
+	region := "topology.datum.net/region"
+	found := []PlacementLocation{
+		{Name: testLocationORD, Topology: map[string]string{TopologyCityCodeKey: testOtherCityCode, region: "us-central"}, Ready: true},
+		{Name: testLocationDFWB, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true},
+		{Name: testLocationDFWA, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true},
+		{Name: "dfw-down", Topology: map[string]string{TopologyCityCodeKey: testCityCode}, Ready: false},
+		{Name: "nowhere", Ready: true},
+	}
+
+	names := func(locations []PlacementLocation) []string {
+		out := make([]string, 0, len(locations))
+		for _, location := range locations {
+			out = append(out, location.Name)
+		}
+		return out
+	}
+
+	t.Run("match labels, sorted, Ready only", func(t *testing.T) {
+		t.Parallel()
+		matched, err := Select(found, &metav1.LabelSelector{
+			MatchLabels: map[string]string{TopologyCityCodeKey: testCityCode},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{testLocationDFWA, testLocationDFWB}, names(matched))
+	})
+
+	t.Run("match expressions", func(t *testing.T) {
+		t.Parallel()
+		matched, err := Select(found, &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: region, Operator: metav1.LabelSelectorOpIn, Values: []string{"us-central", "eu-west"},
+			}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{testLocationORD}, names(matched))
+	})
+
+	t.Run("exists selects every location with the key", func(t *testing.T) {
+		t.Parallel()
+		matched, err := Select(found, &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: TopologyCityCodeKey, Operator: metav1.LabelSelectorOpExists,
+			}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{testLocationDFWA, testLocationDFWB, testLocationORD}, names(matched))
+	})
+
+	t.Run("no match is empty, not an error", func(t *testing.T) {
+		t.Parallel()
+		matched, err := Select(found, &metav1.LabelSelector{
+			MatchLabels: map[string]string{TopologyCityCodeKey: "LHR"},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, matched)
+	})
+
+	t.Run("empty selector is refused", func(t *testing.T) {
+		t.Parallel()
+		_, err := Select(found, &metav1.LabelSelector{})
+		require.Error(t, err)
+		_, err = Select(found, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("malformed selector is refused", func(t *testing.T) {
+		t.Parallel()
+		_, err := Select(found, &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: TopologyCityCodeKey, Operator: metav1.LabelSelectorOpIn,
+			}},
+		})
+		require.Error(t, err)
+	})
+}
+
+// TestPlacementLocationObject pins which kind each source watches for the
+// locations a project may place at.
+func TestPlacementLocationObject(t *testing.T) {
+	t.Parallel()
+
+	obj, err := PlacementLocationObject("")
+	require.NoError(t, err)
+	assert.IsType(t, &networkingv1alpha.LocationBinding{}, obj)
+
+	obj, err = PlacementLocationObject(SourceLocations)
+	require.NoError(t, err)
+	assert.IsType(t, &locationsv1alpha1.Location{}, obj)
+
+	_, err = PlacementLocationObject("Nonsense")
 	require.Error(t, err)
 }

@@ -23,9 +23,11 @@ import (
 )
 
 const (
-	testNetworkName  = "default"
-	testLocationName = "dfw"
-	testHubWDUID     = types.UID("hub-wd-uid-9999")
+	testNetworkName       = "default"
+	testLocationName      = "dfw"
+	testOtherLocationName = "ord"
+	testWestLocationName  = "us-west-1"
+	testHubWDUID          = types.UID("hub-wd-uid-9999")
 )
 
 // testHubDeployment returns the hub copy of the test WorkloadDeployment, already
@@ -243,9 +245,9 @@ func TestEnsureNetworkBinding_RecreatesOnDivergence(t *testing.T) {
 		},
 		{
 			name:         "serving location changed",
-			changed:      withServingLocation("ord"),
+			changed:      withServingLocation(testOtherLocationName),
 			wantNetwork:  testNetworkName,
-			wantLocation: "ord",
+			wantLocation: testOtherLocationName,
 		},
 	}
 

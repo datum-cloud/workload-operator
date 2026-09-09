@@ -79,6 +79,21 @@ Rollout complete in 47s.
 Saved workload config to ./workload.yaml — commit this file to manage deployments declaratively.
 ```
 
+Naming locations is the default. When a developer would rather describe where to run than list it, `--location-selector` selects every ready location whose topology matches, and the placement follows locations as they are added or removed:
+
+```
+$ datumctl compute deploy api \
+    --image=ghcr.io/acme/api:1.4.2 \
+    --location-selector='topology.datum.net/city-code=DFW' \
+    --min=2
+
+Resolving workload "api" in project acme-prod...
+  Workload does not exist — creating.
+  Placement "default": selector=[topology.datum.net/city-code=DFW], min=2
+```
+
+The saved config records the selector, and `datumctl compute workloads describe api` shows which locations it currently resolves to.
+
 If a developer prefers an interactive walk-through:
 
 ```

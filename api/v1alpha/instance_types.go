@@ -924,6 +924,11 @@ const (
 	// WorkloadReasonNoAvailableDeployments is set on a placement's Available
 	// condition when no deployment in that placement is available.
 	WorkloadReasonNoAvailableDeployments = "NoAvailableDeployments"
+
+	// WorkloadReasonNoMatchingLocations is set on a placement's Available
+	// condition when none of the locations it names is Ready, or its selector
+	// matches no Ready location, so the placement has nowhere to run.
+	WorkloadReasonNoMatchingLocations = "NoMatchingLocations"
 )
 
 type InstanceTemplateSpec struct {

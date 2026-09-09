@@ -135,7 +135,7 @@ function PlacementsCard({ workload }: { workload: Workload }) {
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-medium">{p.name}</span>
                   <span className="text-muted-foreground text-xs">
-                    {p.locations.join(', ') || 'no locations'}
+                    {p.locations.join(', ') || p.locationSelector || 'no locations'}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">

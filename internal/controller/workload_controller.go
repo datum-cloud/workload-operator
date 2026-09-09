@@ -33,6 +33,7 @@ import (
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
 const (
@@ -61,6 +62,7 @@ type WorkloadReconciler struct {
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloads/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=compute.datumapis.com,resources=workloads/finalizers,verbs=update
 // +kubebuilder:rbac:groups=networking.datumapis.com,resources=networks,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.datumapis.com,resources=locationbindings,verbs=get;list;watch
 // +kubebuilder:rbac:groups=locations.miloapis.com,resources=locations,verbs=get;list;watch
 
 func (r *WorkloadReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -252,15 +254,20 @@ func (r *WorkloadReconciler) reconcileWorkloadStatus(
 	// Reconcile placement status
 	newWorkloadStatus.Placements = []computev1alpha.WorkloadPlacementStatus{}
 
-	// Sort placement names for deterministic iteration so that equal-priority
-	// deployments in different placements are compared in a stable order.
-	placementNames := make([]string, 0, len(placementDeployments))
-	for name := range placementDeployments {
-		placementNames = append(placementNames, name)
+	// Every placement in the spec is reported, including one that currently
+	// resolves to no location, so the reason it runs nowhere is visible.
+	// Deployments whose placement has left the spec are reported until they
+	// are gone. Names are sorted so that equal-priority deployments in
+	// different placements are compared in a stable order.
+	placementNames := sets.New[string]()
+	for _, placement := range workload.Spec.Placements {
+		placementNames.Insert(placement.Name)
 	}
-	sort.Strings(placementNames)
+	for name := range placementDeployments {
+		placementNames.Insert(name)
+	}
 
-	for _, placementName := range placementNames {
+	for _, placementName := range sets.List(placementNames) {
 		placementDeployments := placementDeployments[placementName]
 		placementStatus := computev1alpha.WorkloadPlacementStatus{
 			Name: placementName,
@@ -331,6 +338,21 @@ func (r *WorkloadReconciler) reconcileWorkloadStatus(
 		placementStatus.UpdatedReplicas = updatedReplicas
 		placementStatus.DesiredReplicas = desiredReplicas
 		placementStatus.ReadyReplicas = readyReplicas
+		placementStatus.Locations = deploymentLocations(sortedDeployments)
+
+		if len(sortedDeployments) == 0 {
+			// Nothing was created for this placement: none of the locations it
+			// names is Ready, or its selector matched no Ready location. The
+			// user resolves this by changing the placement, so it outranks the
+			// generic no-deployments answer.
+			placementAvailableCondition.Reason = computev1alpha.WorkloadReasonNoMatchingLocations
+			placementAvailableCondition.Message = "No Ready location matches this placement, so it has nowhere to run"
+			if p := workloadBlockingReasonPriority(placementAvailableCondition.Reason); p > worstPriority {
+				worstPriority = p
+				worstReason = placementAvailableCondition.Reason
+				worstMessage = fmt.Sprintf("Placement %q matches no Ready location", placementName)
+			}
+		}
 
 		if foundAvailableDeployment {
 			placementAvailableCondition.Status = metav1.ConditionTrue
@@ -466,18 +488,19 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 
 	// Remember this: namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	for _, placement := range workload.Spec.Placements {
-		for _, locationRef := range placement.Locations {
-			if !readyLocations.Has(locationRef.Name) {
-				// TODO(jreese) update status condition on placement if the
-				// location is unknown or not Ready.
-				continue
-			}
+		// A placement that resolves to nothing is reported on its status by
+		// reconcileWorkloadStatus rather than failing the workload here.
+		locationNames, err := resolvePlacementLocations(placement, placementLocations, readyLocations)
+		if err != nil {
+			return nil, nil, fmt.Errorf("placement %q: %w", placement.Name, err)
+		}
 
+		for _, locationName := range locationNames {
 			// TODO(jreese) should we use GenerateName for deployments and identify
 			// them via labels instead? Would help with race conditions on workload
 			// recreation.
 
-			deploymentName := fmt.Sprintf("%s-%s-%s", workload.Name, placement.Name, strings.ToLower(locationRef.Name))
+			deploymentName := fmt.Sprintf("%s-%s-%s", workload.Name, placement.Name, strings.ToLower(locationName))
 			desiredDeployments.Insert(deploymentName)
 
 			desired = append(desired, computev1alpha.WorkloadDeployment{
@@ -486,7 +509,7 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 					Name:      deploymentName,
 					Labels: map[string]string{
 						computev1alpha.WorkloadUIDLabel: string(workload.UID),
-						computev1alpha.LocationLabel:    locationRef.Name,
+						computev1alpha.LocationLabel:    locationName,
 						labelServiceName:                labelServiceNameValue,
 					},
 				},
@@ -496,7 +519,7 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 						UID:  workload.UID,
 					},
 					PlacementName: placement.Name,
-					LocationRef:   locationRef,
+					LocationRef:   locationsv1alpha1.LocationReference{Name: locationName},
 					Template:      workload.Spec.Template,
 					ScaleSettings: placement.ScaleSettings,
 					Replicas:      new(placement.ScaleSettings.MinReplicas),
@@ -515,6 +538,36 @@ func (r *WorkloadReconciler) getDeploymentsForWorkload(
 	}
 
 	return desired, orphaned, nil
+}
+
+// resolvePlacementLocations returns the names of the Ready locations a
+// placement runs at, in a stable order: the locations it names that are Ready,
+// or every Ready location its selector matches. A placement that names
+// locations keeps their declared order; a selector yields locations by name.
+func resolvePlacementLocations(
+	placement computev1alpha.WorkloadPlacement,
+	available []locations.PlacementLocation,
+	ready sets.Set[string],
+) ([]string, error) {
+	if placement.LocationSelector != nil {
+		matched, err := locations.Select(available, placement.LocationSelector)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(matched))
+		for _, location := range matched {
+			names = append(names, location.Name)
+		}
+		return names, nil
+	}
+
+	names := make([]string, 0, len(placement.Locations))
+	for _, ref := range placement.Locations {
+		if ready.Has(ref.Name) {
+			names = append(names, ref.Name)
+		}
+	}
+	return names, nil
 }
 
 // mergeDeploymentMetadata copies the controller-owned labels and annotations
@@ -539,9 +592,35 @@ func (r *WorkloadReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 		return fmt.Errorf("failed to register finalizer: %w", err)
 	}
 
+	// A placement that selects locations by topology gains and loses
+	// deployments as locations come and go, and one that names a location not
+	// yet Ready starts running when it becomes Ready. Neither has any other
+	// wake-up event, so every workload in the project is re-reconciled when
+	// its placement locations change. The kind watched follows the location
+	// source, which every reconcile already reads.
+	placementLocationObject, err := locations.PlacementLocationObject(r.LocationSource)
+	if err != nil {
+		return err
+	}
+
 	b := mcbuilder.ControllerManagedBy(mgr).
 		For(&computev1alpha.Workload{}, mcbuilder.WithEngageWithLocalCluster(false)).
-		Owns(&computev1alpha.WorkloadDeployment{}, mcbuilder.WithEngageWithLocalCluster(false))
+		Owns(&computev1alpha.WorkloadDeployment{}, mcbuilder.WithEngageWithLocalCluster(false)).
+		Watches(placementLocationObject, func(clusterName multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+			return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []mcreconcile.Request {
+				return enqueueAllWorkloads(ctx, cl.GetClient(), clusterName)
+			})
+		},
+			// Workloads live in project control planes, never in the
+			// management cluster this manager runs against, so the management
+			// cluster is not watched and is not asked to serve the kind. The
+			// builder already defaults this to false whenever a provider is
+			// configured; For() and Owns() state it anyway, and so does this.
+			mcbuilder.WithEngageWithLocalCluster(false),
+			// A control plane that does not serve the kind is skipped rather
+			// than watched. See placementLocationClusterFilter.
+			mcbuilder.WithClusterFilter(placementLocationClusterFilter(r.LocationSource)),
+		)
 
 	if !r.NetworkingEnabled {
 		return b.Complete(r)
@@ -624,7 +703,8 @@ func workloadBlockingReasonPriority(reason string) int {
 		computev1alpha.ReferencedDataReasonSourceTooLarge,
 		computev1alpha.ReferencedDataReasonSourceUnauthorized:
 		return 5
-	case computev1alpha.WorkloadReasonNetworkNotFound:
+	case computev1alpha.WorkloadReasonNetworkNotFound,
+		computev1alpha.WorkloadReasonNoMatchingLocations:
 		return 6
 	// This reason outranks every other blocker. No cell can accept the
 	// deployment, so nothing else can make progress, and the user resolves the
@@ -634,4 +714,73 @@ func workloadBlockingReasonPriority(reason string) int {
 	default:
 		return 0
 	}
+}
+
+// deploymentLocations returns the locations the given deployments run at,
+// ordered by name, which is what a placement's status reports as resolved.
+func deploymentLocations(deployments []computev1alpha.WorkloadDeployment) []locationsv1alpha1.LocationReference {
+	names := sets.New[string]()
+	for _, deployment := range deployments {
+		if deployment.Spec.LocationRef.Name != "" {
+			names.Insert(deployment.Spec.LocationRef.Name)
+		}
+	}
+
+	refs := make([]locationsv1alpha1.LocationReference, 0, names.Len())
+	for _, name := range sets.List(names) {
+		refs = append(refs, locationsv1alpha1.LocationReference{Name: name})
+	}
+	return refs
+}
+
+// placementLocationClusterFilter keeps the placement-location watch off a
+// control plane that does not serve the kind.
+//
+// A watch is not a read. ListPlacementLocations degrades to no locations
+// against a control plane that does not serve the kind, but an informer cannot:
+// it retries the rejected list forever, that cluster's cache never syncs, and
+// controller-runtime then blocks every controller on the manager from starting.
+// The manager stays Ready and reconciles nothing until cluster engagement times
+// out, at which point it exits and the pod restarts into the same state.
+//
+// The question is asked per control plane rather than once at startup, because
+// the manager engages many of them and only the one being engaged can answer
+// it. A control plane that gains the kind later is picked up the next time it
+// is engaged.
+func placementLocationClusterFilter(source locations.Source) mcbuilder.ClusterFilterFunc {
+	return func(clusterName multicluster.ClusterName, cl cluster.Cluster) bool {
+		logger := log.Log.WithName("workload").WithValues("cluster", clusterName)
+
+		served, err := locations.ServesPlacementLocationKind(cl.GetRESTMapper(), source)
+		if err != nil {
+			logger.Error(err, "failed to determine whether the cluster serves placement locations; not watching them")
+			return false
+		}
+		if !served {
+			logger.Info("cluster does not serve the placement location kind; not watching placement locations",
+				"locationSource", source)
+		}
+		return served
+	}
+}
+
+// enqueueAllWorkloads maps a change in the project's placement locations to
+// every workload in the project, since any placement may resolve differently.
+func enqueueAllWorkloads(ctx context.Context, c client.Client, clusterName multicluster.ClusterName) []mcreconcile.Request {
+	var workloads computev1alpha.WorkloadList
+	if err := c.List(ctx, &workloads); err != nil {
+		log.FromContext(ctx).Error(err, "failed to list workloads for placement location change")
+		return nil
+	}
+
+	requests := make([]mcreconcile.Request, 0, len(workloads.Items))
+	for _, workload := range workloads.Items {
+		requests = append(requests, mcreconcile.Request{
+			Request: reconcile.Request{
+				NamespacedName: types.NamespacedName{Namespace: workload.Namespace, Name: workload.Name},
+			},
+			ClusterName: clusterName,
+		})
+	}
+	return requests
 }

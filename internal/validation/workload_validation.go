@@ -4,9 +4,15 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
+	"strings"
 
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 	k8scorev1 "k8s.io/api/core/v1"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1validation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -79,6 +85,10 @@ type WorkloadValidationOptions struct {
 	Workload         *computev1alpha.Workload
 	ValidLocations   []string
 
+	// LocationTopologies is the topology of every Ready location, keyed by
+	// name. A placement's locationSelector must match at least one of them.
+	LocationTopologies map[string]map[string]string
+
 	// RuntimeClasses is the catalog of execution tiers this control plane
 	// publishes, read by the caller. The catalog is empty when runtime class
 	// selection is disabled. When selection is enabled, an empty catalog means
@@ -124,9 +134,15 @@ func validateWorkloadPlacement(placement computev1alpha.WorkloadPlacement, field
 	}
 
 	locationsPath := fieldPath.Child("locations")
-	if len(placement.Locations) == 0 {
-		allErrs = append(allErrs, field.Required(locationsPath, ""))
-	} else {
+	selectorPath := fieldPath.Child("locationSelector")
+	switch {
+	case len(placement.Locations) == 0 && placement.LocationSelector == nil:
+		allErrs = append(allErrs, field.Required(locationsPath, "one of locations or locationSelector must be set"))
+	case len(placement.Locations) > 0 && placement.LocationSelector != nil:
+		allErrs = append(allErrs, field.Forbidden(selectorPath, "may not be set together with locations"))
+	case placement.LocationSelector != nil:
+		allErrs = append(allErrs, validateLocationSelector(placement.LocationSelector, selectorPath, opts)...)
+	default:
 		seen := sets.New[string]()
 		for i, location := range placement.Locations {
 			namePath := locationsPath.Index(i).Child("name")
@@ -248,4 +264,41 @@ func validateMetricTarget(target computev1alpha.MetricTarget, fieldPath *field.P
 	}
 
 	return allErrs
+}
+
+// validateLocationSelector checks a placement's selector the way the workload
+// controller will evaluate it: well formed, non-empty, and matching at least
+// one Ready location's topology. A selector that matches nothing is rejected
+// for the same reason an unknown location name is: storing it would admit a
+// placement that never runs anywhere.
+func validateLocationSelector(selector *metav1.LabelSelector, fieldPath *field.Path, opts WorkloadValidationOptions) field.ErrorList {
+	allErrs := metav1validation.ValidateLabelSelector(selector, metav1validation.LabelSelectorValidationOptions{}, fieldPath)
+	if len(allErrs) > 0 {
+		return allErrs
+	}
+
+	if len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0 {
+		return append(allErrs, field.Required(fieldPath, fmt.Sprintf(
+			"an empty selector is not treated as matching every location; select at least one topology key, such as %s",
+			locationsv1alpha1.TopologyCityCodeKey)))
+	}
+
+	sel, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return append(allErrs, field.Invalid(fieldPath, selector, err.Error()))
+	}
+
+	for _, topology := range opts.LocationTopologies {
+		if sel.Matches(labels.Set(topology)) {
+			return allErrs
+		}
+	}
+
+	names := make([]string, 0, len(opts.LocationTopologies))
+	for name := range opts.LocationTopologies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return append(allErrs, field.Invalid(fieldPath, sel.String(), fmt.Sprintf(
+		"matches none of the Ready locations (%s)", strings.Join(names, ", "))))
 }

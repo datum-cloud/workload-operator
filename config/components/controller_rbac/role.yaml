@@ -96,6 +96,17 @@ rules:
 - apiGroups:
   - networking.datumapis.com
   resources:
+  - locationbindings
+  - networkinterfaces
+  - networks
+  - servinglocations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.datumapis.com
+  resources:
   - networkinterfaceclaims
   verbs:
   - create
@@ -104,16 +115,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - networking.datumapis.com
-  resources:
-  - networkinterfaces
-  - networks
-  - servinglocations
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - networking.datumapis.com

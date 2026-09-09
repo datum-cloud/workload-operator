@@ -75,11 +75,13 @@ export const INSTANCE_LABELS = {
 interface RawWorkloadPlacement {
   name: string;
   locations?: Array<{ name: string }>;
+  locationSelector?: RawLabelSelector;
   scaleSettings?: { minReplicas?: number; maxReplicas?: number };
 }
 
 interface RawWorkloadPlacementStatus {
   name?: string;
+  locations?: Array<{ name: string }>;
   conditions?: RawCondition[];
   replicas?: number;
   currentReplicas?: number;
@@ -133,6 +135,55 @@ function deriveReplicasPerRegion(placements: RawWorkloadPlacement[]): number | u
   return mins.every((m) => m === first) ? first : undefined;
 }
 
+interface RawLabelSelector {
+  matchLabels?: Record<string, string>;
+  matchExpressions?: Array<{ key: string; operator: string; values?: string[] }>;
+}
+
+/** Renders a label selector the way kubectl prints it, e.g. "city-code=DFW, region in (a,b)". */
+function formatLabelSelector(selector: RawLabelSelector): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(selector.matchLabels ?? {})) {
+    parts.push(`${key}=${value}`);
+  }
+  for (const expr of selector.matchExpressions ?? []) {
+    const values = (expr.values ?? []).join(',');
+    switch (expr.operator) {
+      case 'In':
+        parts.push(`${expr.key} in (${values})`);
+        break;
+      case 'NotIn':
+        parts.push(`${expr.key} notin (${values})`);
+        break;
+      case 'Exists':
+        parts.push(expr.key);
+        break;
+      case 'DoesNotExist':
+        parts.push(`!${expr.key}`);
+        break;
+      default:
+        parts.push(`${expr.key} ${expr.operator} (${values})`);
+    }
+  }
+  return parts.join(', ');
+}
+
+/**
+ * The locations a placement runs at: what the controller resolved when status
+ * is present, else what the spec names. A selector-based placement has no
+ * names in its spec, so status is the only place its locations appear.
+ */
+function placementLocations(p: RawWorkloadPlacement, status?: RawWorkloadPlacementStatus): string[] {
+  const resolved = (status?.locations ?? []).map((location) => location.name);
+  if (resolved.length > 0) return resolved;
+  return (p.locations ?? []).map((location) => location.name);
+}
+
+function workloadLocations(placements: RawWorkloadPlacement[], statusPlacements: RawWorkloadPlacementStatus[]): string[] {
+  const statusByName = new Map(statusPlacements.filter((s) => !!s.name).map((s) => [s.name, s]));
+  return Array.from(new Set(placements.flatMap((p) => placementLocations(p, statusByName.get(p.name)))));
+}
+
 function toPlacements(
   placements: RawWorkloadPlacement[],
   statusPlacements: RawWorkloadPlacementStatus[]
@@ -163,7 +214,8 @@ function toPlacements(
 
     return {
       name: p.name,
-      locations: (p.locations ?? []).map((location) => location.name),
+      locations: placementLocations(p, status),
+      locationSelector: p.locationSelector ? formatLabelSelector(p.locationSelector) : undefined,
       readyReplicas: ready,
       desiredReplicas: desired,
       currentReplicas: current,
@@ -194,7 +246,7 @@ export function toWorkload(raw: RawWorkload): Workload {
     placements: toPlacements(placements, raw.status?.placements ?? []),
     conditions: toConditions(conditions),
     runtimeType: runtime ? (runtime.sandbox ? 'Container sandbox' : 'Virtual machine') : undefined,
-    locations: Array.from(new Set(placements.flatMap((p) => (p.locations ?? []).map((location) => location.name)))),
+    locations: workloadLocations(placements, raw.status?.placements ?? []),
     resources: deriveResources(runtime),
     replicasPerRegion: deriveReplicasPerRegion(placements),
   };

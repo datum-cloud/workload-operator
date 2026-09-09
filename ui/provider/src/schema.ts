@@ -26,6 +26,8 @@ export type Condition = z.infer<typeof conditionSchema>;
 export const workloadPlacementSchema = z.object({
   name: z.string(),
   locations: z.array(z.string()).default([]),
+  /** Topology selector the placement resolves through, when it does not name locations. */
+  locationSelector: z.string().optional(),
   readyReplicas: z.number(),
   desiredReplicas: z.number(),
   currentReplicas: z.number(),

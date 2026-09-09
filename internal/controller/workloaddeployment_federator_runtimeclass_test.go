@@ -221,7 +221,7 @@ func TestCleanupPropagationPolicyIfUnused_PerLocationAndClass(t *testing.T) {
 			classesEnabled: true,
 			location:       testFederatorLocation,
 			runtimeClass:   testClassAzurite,
-			remaining:      []client.Object{hubSiblingDeployment("us-west-1", testClassAzurite)},
+			remaining:      []client.Object{hubSiblingDeployment(testWestLocationName, testClassAzurite)},
 			wantPPGone:     true,
 		},
 		{
@@ -297,7 +297,7 @@ func TestWorkloadDeploymentFederator_UnservedRuntimeClassCondition(t *testing.T)
 			name:           "the class is served elsewhere, not here",
 			classesEnabled: true,
 			specClass:      testClassBasalt,
-			cells:          []client.Object{testCell("sea-cell", "us-west-1", testClassBasalt)},
+			cells:          []client.Object{testCell("sea-cell", testWestLocationName, testClassBasalt)},
 			wantReason:     computev1alpha.WorkloadDeploymentReasonRuntimeClassNotServed,
 		},
 		{

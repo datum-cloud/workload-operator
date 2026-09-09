@@ -50,6 +50,90 @@ func TestValidateWorkloads(t *testing.T) {
 				field.Required(field.NewPath("spec.placements"), ""),
 			},
 		},
+		"location selector by city code": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].Locations = nil
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{
+						MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: testCityCodeDFW},
+					}
+				},
+			),
+			expectedErrors: field.ErrorList{},
+		},
+		"location selector by expression": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].Locations = nil
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      locationsv1alpha1.TopologyCityCodeKey,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{testCityCodeDFW, "ORD"},
+						}},
+					}
+				},
+			),
+			expectedErrors: field.ErrorList{},
+		},
+		"location selector matching no ready location": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].Locations = nil
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{
+						MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: "LHR"},
+					}
+				},
+			),
+			expectedErrors: field.ErrorList{
+				field.Invalid(field.NewPath("spec.placements[0].locationSelector"), "", ""),
+			},
+		},
+		"empty location selector": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].Locations = nil
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{}
+				},
+			),
+			expectedErrors: field.ErrorList{
+				field.Required(field.NewPath("spec.placements[0].locationSelector"), ""),
+			},
+		},
+		"malformed location selector": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].Locations = nil
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      locationsv1alpha1.TopologyCityCodeKey,
+							Operator: metav1.LabelSelectorOpIn,
+						}},
+					}
+				},
+			),
+			expectedErrors: field.ErrorList{
+				field.Required(field.NewPath("spec.placements[0].locationSelector.matchExpressions[0].values"), ""),
+			},
+		},
+		"location selector together with locations": {
+			workload: MakeSandboxWorkload(
+				"test",
+				func(w *computev1alpha.Workload) {
+					w.Spec.Placements[0].LocationSelector = &metav1.LabelSelector{
+						MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: testCityCodeDFW},
+					}
+				},
+			),
+			expectedErrors: field.ErrorList{
+				field.Forbidden(field.NewPath("spec.placements[0].locationSelector"), ""),
+			},
+		},
 		"missing location": {
 			workload: MakeSandboxWorkload(
 				"test",
@@ -618,6 +702,11 @@ func TestValidateWorkloads(t *testing.T) {
 
 		if len(scenario.opts.ValidLocations) == 0 {
 			scenario.opts.ValidLocations = []string{testCityCodeDFW}
+		}
+		if scenario.opts.LocationTopologies == nil {
+			scenario.opts.LocationTopologies = map[string]map[string]string{
+				testCityCodeDFW: {locationsv1alpha1.TopologyCityCodeKey: testCityCodeDFW},
+			}
 		}
 
 		t.Run(name, func(t *testing.T) {

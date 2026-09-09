@@ -337,7 +337,7 @@ func TestInstanceLocation_SetFromDeploymentSpec(t *testing.T) {
 	control := New()
 
 	deployment := getWorkloadDeployment("test-location-set", 1)
-	deployment.Spec.LocationRef = locationsv1alpha1.LocationReference{Name: "loc-dfw-1"}
+	deployment.Spec.LocationRef = locationsv1alpha1.LocationReference{Name: testLocationName}
 
 	var currentInstances []v1alpha.Instance
 	actions, err := control.GetActions(ctx, scheme, deployment, deployment.Spec.ScaleSettings.MinReplicas, currentInstances)
@@ -349,7 +349,7 @@ func TestInstanceLocation_SetFromDeploymentSpec(t *testing.T) {
 	assert.True(t, ok)
 	assert.NotNil(t, instance.Spec.Location,
 		"Spec.Location must be set from deployment.spec.locationRef")
-	assert.Equal(t, "loc-dfw-1", instance.Spec.Location.Name)
+	assert.Equal(t, testLocationName, instance.Spec.Location.Name)
 }
 
 // TestLabelBackfill_NotReadyMatchingHash verifies that a not-Ready instance
@@ -620,7 +620,7 @@ func getWorkloadDeployment(name string, minReplicas int32) *v1alpha.WorkloadDepl
 				UID:  "test-workload-uid",
 			},
 			PlacementName: "test-placement",
-			LocationRef:   locationsv1alpha1.LocationReference{Name: "loc-dfw-1"},
+			LocationRef:   locationsv1alpha1.LocationReference{Name: testLocationName},
 			ScaleSettings: v1alpha.HorizontalScaleSettings{
 				MinReplicas:              minReplicas,
 				InstanceManagementPolicy: v1alpha.OrderedReadyInstanceManagementPolicyType,

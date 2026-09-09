@@ -17,6 +17,7 @@ import (
 const (
 	testClassAzurite = "azurite"
 	testClassBasalt  = "basalt"
+	testLocationName = "loc-dfw-1"
 )
 
 // TestInstanceLabels_RuntimeClassStamped verifies that an instance carries the
@@ -72,7 +73,7 @@ func TestInstanceLabels_PreClassesSetIsUnchanged(t *testing.T) {
 		v1alpha.WorkloadUIDLabel:            "test-workload-uid",
 		v1alpha.WorkloadDeploymentUIDLabel:  "test-wd-uid",
 		v1alpha.WorkloadDeploymentNameLabel: "test-pre-classes-labels",
-		v1alpha.LocationLabel:               "loc-dfw-1",
+		v1alpha.LocationLabel:               testLocationName,
 		v1alpha.WorkloadNameLabel:           "test-workload",
 		v1alpha.PlacementNameLabel:          "test-placement",
 		labelServiceKey:                     labelServiceValue,

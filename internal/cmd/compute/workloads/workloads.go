@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -376,12 +377,8 @@ func runDescribe(cmd *cobra.Command, args []string) error {
 			if p.ScaleSettings.MaxReplicas != nil {
 				maxStr = fmt.Sprintf("%d", *p.ScaleSettings.MaxReplicas)
 			}
-			locationNames := make([]string, 0, len(p.Locations))
-			for _, ref := range p.Locations {
-				locationNames = append(locationNames, ref.Name)
-			}
-			fmt.Fprintf(out, "  %-10s locations: %-24s scale: %d..%s\n",
-				p.Name, strings.Join(locationNames, ", "), p.ScaleSettings.MinReplicas, maxStr)
+			fmt.Fprintf(out, "  %-10s %-34s scale: %d..%s\n",
+				p.Name, placementLocationsSummary(p), p.ScaleSettings.MinReplicas, maxStr)
 
 			// Per-location lines from deployments.
 			for _, d := range deplsByPlacement[p.Name] {
@@ -473,4 +470,17 @@ func formatEnvVar(e corev1.EnvVar) string {
 		}
 	}
 	return fmt.Sprintf("%-20s %s", e.Name, e.Value)
+}
+
+// placementLocationsSummary says where a placement runs: the locations it
+// names, or the topology selector it resolves through.
+func placementLocationsSummary(p computev1alpha.WorkloadPlacement) string {
+	if p.LocationSelector != nil {
+		return "selector: " + metav1.FormatLabelSelector(p.LocationSelector)
+	}
+	names := make([]string, 0, len(p.Locations))
+	for _, ref := range p.Locations {
+		names = append(names, ref.Name)
+	}
+	return "locations: " + strings.Join(names, ", ")
 }

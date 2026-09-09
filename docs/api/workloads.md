@@ -119,13 +119,6 @@ will live in, such as in a city, or region.<br/>
         </tr>
     </thead>
     <tbody><tr>
-        <td><b><a href="#workloadspecplacementsindexlocationsindex">locations</a></b></td>
-        <td>[]object</td>
-        <td>
-          A list of locations where the instances should be deployed.<br/>
-        </td>
-        <td>true</td>
-      </tr><tr>
         <td><b>name</b></td>
         <td>string</td>
         <td>
@@ -139,33 +132,27 @@ will live in, such as in a city, or region.<br/>
           Scale settings such as minimum and maximum replica counts.<br/>
         </td>
         <td>true</td>
-      </tr></tbody>
-</table>
-
-
-### Workload.spec.placements[index].locations[index]
-<sup><sup>[↩ Parent](#workloadspecplacementsindex)</sup></sup>
-
-
-
-
-
-<table>
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Description</th>
-            <th>Required</th>
-        </tr>
-    </thead>
-    <tbody><tr>
-        <td><b>name</b></td>
-        <td>string</td>
+      </tr><tr>
+        <td><b><a href="#workloadspecplacementsindexlocationselector">locationSelector</a></b></td>
+        <td>object</td>
         <td>
-          Name of a datum location<br/>
+          A selector over the topology of the locations available to the project,
+such as topology.datum.net/city-code or topology.datum.net/region. Every
+Ready location whose topology matches receives a deployment, and the set
+is re-evaluated as locations are added, removed, or change readiness. An
+empty selector is rejected rather than treated as matching every
+location. Exactly one of locations or locationSelector must be set.<br/>
         </td>
-        <td>true</td>
+        <td>false</td>
+      </tr><tr>
+        <td><b><a href="#workloadspecplacementsindexlocationsindex">locations</a></b></td>
+        <td>[]object</td>
+        <td>
+          The locations where the instances should be deployed, by name. Use this
+to pin a placement to specific locations. Exactly one of locations or
+locationSelector must be set.<br/>
+        </td>
+        <td>false</td>
       </tr></tbody>
 </table>
 
@@ -328,6 +315,120 @@ the requested value of the resource for the instances.<br/>
           The target value of the metric (as a quantity).<br/>
         </td>
         <td>false</td>
+      </tr></tbody>
+</table>
+
+
+### Workload.spec.placements[index].locationSelector
+<sup><sup>[↩ Parent](#workloadspecplacementsindex)</sup></sup>
+
+
+
+A selector over the topology of the locations available to the project,
+such as topology.datum.net/city-code or topology.datum.net/region. Every
+Ready location whose topology matches receives a deployment, and the set
+is re-evaluated as locations are added, removed, or change readiness. An
+empty selector is rejected rather than treated as matching every
+location. Exactly one of locations or locationSelector must be set.
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Required</th>
+        </tr>
+    </thead>
+    <tbody><tr>
+        <td><b><a href="#workloadspecplacementsindexlocationselectormatchexpressionsindex">matchExpressions</a></b></td>
+        <td>[]object</td>
+        <td>
+          matchExpressions is a list of label selector requirements. The requirements are ANDed.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>matchLabels</b></td>
+        <td>map[string]string</td>
+        <td>
+          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+map is equivalent to an element of matchExpressions, whose key field is "key", the
+operator is "In", and the values array contains only "value". The requirements are ANDed.<br/>
+        </td>
+        <td>false</td>
+      </tr></tbody>
+</table>
+
+
+### Workload.spec.placements[index].locationSelector.matchExpressions[index]
+<sup><sup>[↩ Parent](#workloadspecplacementsindexlocationselector)</sup></sup>
+
+
+
+A label selector requirement is a selector that contains values, a key, and an operator that
+relates the key and values.
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Required</th>
+        </tr>
+    </thead>
+    <tbody><tr>
+        <td><b>key</b></td>
+        <td>string</td>
+        <td>
+          key is the label key that the selector applies to.<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>operator</b></td>
+        <td>string</td>
+        <td>
+          operator represents a key's relationship to a set of values.
+Valid operators are In, NotIn, Exists and DoesNotExist.<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>values</b></td>
+        <td>[]string</td>
+        <td>
+          values is an array of string values. If the operator is In or NotIn,
+the values array must be non-empty. If the operator is Exists or DoesNotExist,
+the values array must be empty. This array is replaced during a strategic
+merge patch.<br/>
+        </td>
+        <td>false</td>
+      </tr></tbody>
+</table>
+
+
+### Workload.spec.placements[index].locations[index]
+<sup><sup>[↩ Parent](#workloadspecplacementsindex)</sup></sup>
+
+
+
+
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Required</th>
+        </tr>
+    </thead>
+    <tbody><tr>
+        <td><b>name</b></td>
+        <td>string</td>
+        <td>
+          Name of a datum location<br/>
+        </td>
+        <td>true</td>
       </tr></tbody>
 </table>
 
@@ -3199,6 +3300,14 @@ of readiness. Lags Replicas during a rolling update or restart.<br/>
 Known condition types are: "Available", "Progressing"<br/>
         </td>
         <td>false</td>
+      </tr><tr>
+        <td><b><a href="#workloadstatusplacementsindexlocationsindex">locations</a></b></td>
+        <td>[]object</td>
+        <td>
+          The locations the placement currently resolves to: the Ready locations
+it names, or every Ready location its selector matches.<br/>
+        </td>
+        <td>false</td>
       </tr></tbody>
 </table>
 
@@ -3276,5 +3385,32 @@ with respect to the current state of the instance.<br/>
             <i>Minimum</i>: 0<br/>
         </td>
         <td>false</td>
+      </tr></tbody>
+</table>
+
+
+### Workload.status.placements[index].locations[index]
+<sup><sup>[↩ Parent](#workloadstatusplacementsindex)</sup></sup>
+
+
+
+
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Required</th>
+        </tr>
+    </thead>
+    <tbody><tr>
+        <td><b>name</b></td>
+        <td>string</td>
+        <td>
+          Name of a datum location<br/>
+        </td>
+        <td>true</td>
       </tr></tbody>
 </table>

@@ -131,17 +131,30 @@ type WorkloadList struct {
 	Items           []Workload `json:"items"`
 }
 
+// +kubebuilder:validation:XValidation:message="exactly one of locations or locationSelector must be set",rule="has(self.locations) != has(self.locationSelector)"
 type WorkloadPlacement struct {
 	// The name of the placement
 	//
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
-	// A list of locations where the instances should be deployed.
+	// The locations where the instances should be deployed, by name. Use this
+	// to pin a placement to specific locations. Exactly one of locations or
+	// locationSelector must be set.
 	//
-	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MinItems=1
 	Locations []locationsv1alpha1.LocationReference `json:"locations,omitempty"`
+
+	// A selector over the topology of the locations available to the project,
+	// such as topology.datum.net/city-code or topology.datum.net/region. Every
+	// Ready location whose topology matches receives a deployment, and the set
+	// is re-evaluated as locations are added, removed, or change readiness. An
+	// empty selector is rejected rather than treated as matching every
+	// location. Exactly one of locations or locationSelector must be set.
+	//
+	// +kubebuilder:validation:Optional
+	LocationSelector *metav1.LabelSelector `json:"locationSelector,omitempty"`
 
 	// Scale settings such as minimum and maximum replica counts.
 	//
@@ -152,6 +165,10 @@ type WorkloadPlacement struct {
 type WorkloadPlacementStatus struct {
 	// The name of the placement
 	Name string `json:"name"`
+
+	// The locations the placement currently resolves to: the Ready locations
+	// it names, or every Ready location its selector matches.
+	Locations []locationsv1alpha1.LocationReference `json:"locations,omitempty"`
 
 	// Represents the observations of a placement's current state.
 	// Known condition types are: "Available", "Progressing"

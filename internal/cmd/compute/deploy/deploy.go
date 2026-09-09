@@ -33,6 +33,7 @@ type options struct {
 	build                string
 	instanceType         string
 	locations            []string
+	locationSelector     string
 	cities               []string
 	allMatchingLocations bool
 	min                  int32
@@ -69,6 +70,9 @@ a fix is applied — same as 'datumctl compute build --fix'.`,
   # Build from another directory
   datumctl compute deploy api --build=./api --image=ghcr.io/acme/api:1.4.2 --location=us-east-1,eu-west-1
 
+  # Select locations by topology instead of naming them
+  datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --location-selector='topology.datum.net/city-code=DFW'
+
   # Interactive mode
   datumctl compute deploy
 
@@ -85,6 +89,7 @@ a fix is applied — same as 'datumctl compute build --fix'.`,
 	cmd.Flags().Lookup("build").NoOptDefVal = "."
 	cmd.Flags().StringVar(&opts.instanceType, "instance-type", "datumcloud/d1-standard-2", "Instance type (e.g. datumcloud/d1-standard-2)")
 	cmd.Flags().StringSliceVar(&opts.locations, "location", nil, "One or more locations to deploy to (e.g. us-east-1,eu-west-1)")
+	cmd.Flags().StringVar(&opts.locationSelector, "location-selector", "", "Select every location whose topology matches a label selector (e.g. 'topology.datum.net/city-code=DFW' or 'topology.datum.net/region in (us-east-1,eu-west-1)')")
 	cmd.Flags().StringSliceVar(&opts.cities, "city", nil, "Resolve a city code to an available location (e.g. IAD)")
 	cmd.Flags().BoolVar(&opts.allMatchingLocations, "all-matching-locations", false, "Deploy to every location matching --city")
 	cmd.Flags().Int32Var(&opts.min, "min", 1, "Minimum number of instances per location")
@@ -144,11 +149,25 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 	if opts.image == "" {
 		return fmt.Errorf("--image is required")
 	}
-	if len(opts.locations) == 0 && len(opts.cities) == 0 {
-		return fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); use --city to resolve a city code")
+	placementFlags := 0
+	for _, set := range []bool{len(opts.locations) > 0, len(opts.cities) > 0, opts.locationSelector != ""} {
+		if set {
+			placementFlags++
+		}
 	}
-	if len(opts.locations) > 0 && len(opts.cities) > 0 {
-		return fmt.Errorf("--location and --city are mutually exclusive")
+	if placementFlags == 0 {
+		return fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); use --city to resolve a city code, or --location-selector to select locations by topology")
+	}
+	if placementFlags > 1 {
+		return fmt.Errorf("--location, --city, and --location-selector are mutually exclusive")
+	}
+	var locationSelector *metav1.LabelSelector
+	if opts.locationSelector != "" {
+		parsed, err := metav1.ParseToLabelSelector(opts.locationSelector)
+		if err != nil {
+			return fmt.Errorf("invalid --location-selector %q: %w", opts.locationSelector, err)
+		}
+		locationSelector = parsed
 	}
 	instanceType := opts.instanceType
 	if instanceType == "" {
@@ -211,8 +230,9 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 	}
 	// All locations go into one "default" placement.
 	placement := computev1alpha.WorkloadPlacement{
-		Name:      "default",
-		Locations: locationRefs,
+		Name:             "default",
+		Locations:        locationRefs,
+		LocationSelector: locationSelector,
 		ScaleSettings: computev1alpha.HorizontalScaleSettings{
 			MinReplicas:              opts.min,
 			InstanceManagementPolicy: computev1alpha.OrderedReadyInstanceManagementPolicyType,
@@ -241,8 +261,7 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 		Placements: []computev1alpha.WorkloadPlacement{placement},
 	}
 
-	fmt.Fprintf(out, "  Placement \"default\": locations=[%s], min=%d\n",
-		strings.Join(locations, ", "), opts.min)
+	fmt.Fprintf(out, "  Placement \"default\": %s, min=%d\n", describePlacementLocations(placement), opts.min)
 
 	// Prompt unless --yes or non-interactive.
 	if !opts.yes && term.IsTerminal(int(os.Stdin.Fd())) {
@@ -476,13 +495,11 @@ func manifestDiff(existing, desired computev1alpha.Workload) []string {
 				lines = append(lines, fmt.Sprintf("  placement %q min replicas: %d → %d",
 					name, op.ScaleSettings.MinReplicas, np.ScaleSettings.MinReplicas))
 			}
-		} else {
-			locationNames := make([]string, 0, len(np.Locations))
-			for _, ref := range np.Locations {
-				locationNames = append(locationNames, ref.Name)
+			if before, after := describePlacementLocations(op), describePlacementLocations(np); before != after {
+				lines = append(lines, fmt.Sprintf("  placement %q: %s → %s", name, before, after))
 			}
-			lines = append(lines, fmt.Sprintf("  + new placement %q: locations=[%s]",
-				name, strings.Join(locationNames, ", ")))
+		} else {
+			lines = append(lines, fmt.Sprintf("  + new placement %q: %s", name, describePlacementLocations(np)))
 		}
 	}
 	for name := range oldPlacements {
@@ -518,4 +535,17 @@ func resolveCities(ctx context.Context, c client.Client, cities []string, all bo
 		resolved = append(resolved, matches...)
 	}
 	return resolved, nil
+}
+
+// describePlacementLocations says where a placement runs the way the CLI
+// prints it: the locations it names, or the selector it resolves through.
+func describePlacementLocations(p computev1alpha.WorkloadPlacement) string {
+	if p.LocationSelector != nil {
+		return fmt.Sprintf("selector=[%s]", metav1.FormatLabelSelector(p.LocationSelector))
+	}
+	names := make([]string, 0, len(p.Locations))
+	for _, ref := range p.Locations {
+		names = append(names, ref.Name)
+	}
+	return fmt.Sprintf("locations=[%s]", strings.Join(names, ", "))
 }

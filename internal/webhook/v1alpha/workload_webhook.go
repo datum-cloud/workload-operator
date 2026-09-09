@@ -47,14 +47,31 @@ type workloadWebhook struct {
 	locationSource locations.Source
 }
 
-// validLocations returns the names a placement may reference: the locations
-// projected into the project control plane that are Ready to accept workloads.
-func (r *workloadWebhook) validLocations(ctx context.Context, c client.Client) ([]string, error) {
+// readyLocations describes the locations a placement may run at: the
+// locations projected into the project control plane that are Ready to accept
+// workloads, as the names a placement may list and the topology a selector is
+// matched against.
+type readyLocations struct {
+	names      []string
+	topologies map[string]map[string]string
+}
+
+func (r *workloadWebhook) readyLocations(ctx context.Context, c client.Client) (readyLocations, error) {
 	placementLocations, err := locations.ListPlacementLocations(ctx, c, r.locationSource)
 	if err != nil {
-		return nil, err
+		return readyLocations{}, err
 	}
-	return sets.List(locations.ReadyNames(placementLocations)), nil
+
+	ready := readyLocations{
+		names:      sets.List(locations.ReadyNames(placementLocations)),
+		topologies: make(map[string]map[string]string),
+	}
+	for _, location := range placementLocations {
+		if location.Ready {
+			ready.topologies[location.Name] = location.Topology
+		}
+	}
+	return ready, nil
 }
 
 var _ admission.Defaulter[*computev1alpha.Workload] = &workloadWebhook{}
@@ -116,7 +133,7 @@ func (r *workloadWebhook) ValidateCreate(ctx context.Context, workload *computev
 	// that means for the scheduling phase, since there would not currently be
 	// sufficient context to know who created the workload and what locations
 	// are valid candidates based on that. Maybe an annotation, or spec field?
-	validLocations, err := r.validLocations(ctx, clusterClient)
+	ready, err := r.readyLocations(ctx, clusterClient)
 	if err != nil {
 		return nil, err
 	}
@@ -127,12 +144,13 @@ func (r *workloadWebhook) ValidateCreate(ctx context.Context, workload *computev
 	}
 
 	opts := validation.WorkloadValidationOptions{
-		Context:          ctx,
-		Client:           clusterClient,
-		AdmissionRequest: req,
-		Workload:         workload,
-		ValidLocations:   validLocations,
-		RuntimeClasses:   runtimeClasses,
+		Context:            ctx,
+		Client:             clusterClient,
+		AdmissionRequest:   req,
+		Workload:           workload,
+		ValidLocations:     ready.names,
+		LocationTopologies: ready.topologies,
+		RuntimeClasses:     runtimeClasses,
 	}
 
 	if errs := validation.ValidateWorkloadCreate(workload, opts); len(errs) > 0 {
@@ -158,7 +176,7 @@ func (r *workloadWebhook) ValidateUpdate(ctx context.Context, oldWorkload *compu
 		return nil, err
 	}
 
-	validLocations, err := r.validLocations(ctx, clusterClient)
+	ready, err := r.readyLocations(ctx, clusterClient)
 	if err != nil {
 		return nil, err
 	}
@@ -169,12 +187,13 @@ func (r *workloadWebhook) ValidateUpdate(ctx context.Context, oldWorkload *compu
 	}
 
 	opts := validation.WorkloadValidationOptions{
-		Context:          ctx,
-		Client:           clusterClient,
-		AdmissionRequest: req,
-		Workload:         newWorkload,
-		ValidLocations:   validLocations,
-		RuntimeClasses:   runtimeClasses,
+		Context:            ctx,
+		Client:             clusterClient,
+		AdmissionRequest:   req,
+		Workload:           newWorkload,
+		ValidLocations:     ready.names,
+		LocationTopologies: ready.topologies,
+		RuntimeClasses:     runtimeClasses,
 	}
 
 	if errs := validation.ValidateWorkloadUpdate(newWorkload, oldWorkload, opts); len(errs) > 0 {

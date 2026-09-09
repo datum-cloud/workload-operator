@@ -514,6 +514,18 @@ var catalog = []ReasonInfo{
 		Remediation:    "Look at what this placement created; the cause is there.",
 		Skill:          SkillWorkloadNotAvailable,
 	},
+	{
+		Reason:         computev1alpha.WorkloadReasonNoMatchingLocations,
+		ConditionTypes: []string{computev1alpha.WorkloadAvailable},
+		Actionability:  ActionabilityUser,
+		Explanation: "This placement resolves to no location, so nothing was created for it. Either none " +
+			"of the locations it names is ready, or its location selector matches none of the " +
+			"project's ready locations.",
+		Remediation: "Compare the placement against the project's locations and their topology " +
+			"(city code, region). Name a location that exists, or widen the selector until it " +
+			"matches one.",
+		Skill: SkillWorkloadNotAvailable,
+	},
 
 	// Runtime classes. A workload selects a class to say how it should be
 	// executed; the class is Datum's catalog object, and its Accepted status is

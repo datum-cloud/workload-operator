@@ -86,7 +86,7 @@ func TestGetDeploymentsForWorkload_LocationsSource(t *testing.T) {
 			Placements: []computev1alpha.WorkloadPlacement{
 				{
 					Name:      testDefaultPlacement,
-					Locations: []locationsv1alpha1.LocationReference{{Name: "dfw"}},
+					Locations: []locationsv1alpha1.LocationReference{{Name: testLocationName}},
 					ScaleSettings: computev1alpha.HorizontalScaleSettings{
 						MinReplicas: 1,
 					},
@@ -97,7 +97,7 @@ func TestGetDeploymentsForWorkload_LocationsSource(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(newLocationsServiceScheme()).
-		WithObjects(newLocationsServiceLocation("dfw", locSourceTestCityCode)).
+		WithObjects(newLocationsServiceLocation(testLocationName, locSourceTestCityCode)).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
 
@@ -107,7 +107,7 @@ func TestGetDeploymentsForWorkload_LocationsSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, orphaned)
 	require.Len(t, desired, 1)
-	assert.Equal(t, "dfw", desired[0].Spec.LocationRef.Name)
+	assert.Equal(t, testLocationName, desired[0].Spec.LocationRef.Name)
 }
 
 // TestGetDeploymentsForWorkload_LocationsSourceIgnoresBindings verifies the
@@ -126,7 +126,7 @@ func TestGetDeploymentsForWorkload_LocationsSourceIgnoresBindings(t *testing.T) 
 
 	cl := fake.NewClientBuilder().
 		WithScheme(newLocationsServiceScheme()).
-		WithObjects(newTestLocationBinding("dfw", locSourceTestCityCode)).
+		WithObjects(newTestLocationBinding(testLocationName, locSourceTestCityCode)).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
 

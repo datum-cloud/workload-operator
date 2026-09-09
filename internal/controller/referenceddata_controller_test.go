@@ -1508,10 +1508,10 @@ func TestFederator_StatusSync_PreservesReferencedDataReadyCondition(t *testing.T
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      testWDName,
 			Namespace: testKarmadaNSStr,
-			Labels:    map[string]string{locationLabel: "us-west-1"},
+			Labels:    map[string]string{locationLabel: testWestLocationName},
 		},
 		Spec: computev1alpha.WorkloadDeploymentSpec{
-			LocationRef:   locationsv1alpha1.LocationReference{Name: "us-west-1"},
+			LocationRef:   locationsv1alpha1.LocationReference{Name: testWestLocationName},
 			PlacementName: testDefaultPlacement,
 			WorkloadRef:   computev1alpha.WorkloadReference{Name: rdTestWorkloadName},
 			ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
