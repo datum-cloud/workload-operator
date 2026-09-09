@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	"go.datum.net/datumctl/plugin"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
@@ -48,47 +49,63 @@ func CompleteLocations(cmd *cobra.Command, _ []string, toComplete string) ([]str
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeCommaList(locationCandidates(list, false), toComplete)
+	return completeCommaList(locationCandidates(list, nil), toComplete)
 }
 
 // CompletePlacementLocations completes a deploy-time --location flag with the
 // locations a placement may name: those projected into the project that are
-// Ready. Admission rejects any other, so they are not offered.
+// Ready and where compute is available. Admission rejects any other, so they
+// are not offered.
 func CompletePlacementLocations(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	list, ok := projectedLocations(cmd)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeCommaList(locationCandidates(list, true), toComplete)
+	return completeCommaList(locationCandidates(list, placeable(cmd)), toComplete)
 }
 
-// CompleteCityCodes completes --city with the city codes of the project's
-// Ready locations.
+// CompleteCityCodes completes --city with the city codes of the locations a
+// placement may run at.
 func CompleteCityCodes(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	list, ok := projectedLocations(cmd)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeCommaList(cityCodeCandidates(list), toComplete)
+	return completeCommaList(cityCodeCandidates(list, placeable(cmd)), toComplete)
 }
 
 // CompleteLocationSelector completes --location-selector with the key=value
-// pairs found in the topology of the project's Ready locations, so a user can
-// discover which topology keys exist without reading each Location.
+// pairs found in the topology of the locations a placement may run at, so a
+// user can discover which topology keys exist without reading each Location.
 func CompleteLocationSelector(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	list, ok := projectedLocations(cmd)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeCommaList(selectorCandidates(list), toComplete)
+	return completeCommaList(selectorCandidates(list, placeable(cmd)), toComplete)
 }
 
-// locationCandidates returns location names, sorted, optionally only the
-// Ready ones.
-func locationCandidates(list locationsv1alpha1.LocationList, readyOnly bool) []string {
+// placeableFilter decides which projected locations a placement may run at.
+// A nil filter accepts every location.
+type placeableFilter func(locationsv1alpha1.Location) bool
+
+// placeable returns the filter a placement is held to: the location is Ready
+// and compute is available there. Availability is read from the
+// ServiceAvailability records the platform mirrors into the project; a project
+// that does not serve them enforces no availability gate.
+func placeable(cmd *cobra.Command) placeableFilter {
+	available, enforced := availableLocations(cmd)
+	return func(location locationsv1alpha1.Location) bool {
+		return locationIsReady(location) && (!enforced || available.Has(location.Name))
+	}
+}
+
+// locationCandidates returns the names of the locations the filter accepts,
+// sorted.
+func locationCandidates(list locationsv1alpha1.LocationList, accept placeableFilter) []string {
 	names := make([]string, 0, len(list.Items))
 	for _, location := range list.Items {
-		if readyOnly && !locationIsReady(location) {
+		if accept != nil && !accept(location) {
 			continue
 		}
 		names = append(names, location.Name)
@@ -97,12 +114,12 @@ func locationCandidates(list locationsv1alpha1.LocationList, readyOnly bool) []s
 	return names
 }
 
-// cityCodeCandidates returns the distinct city codes of Ready locations,
-// sorted.
-func cityCodeCandidates(list locationsv1alpha1.LocationList) []string {
+// cityCodeCandidates returns the distinct city codes of the locations the
+// filter accepts, sorted.
+func cityCodeCandidates(list locationsv1alpha1.LocationList, accept placeableFilter) []string {
 	codes := sets.New[string]()
 	for _, location := range list.Items {
-		if !locationIsReady(location) {
+		if accept != nil && !accept(location) {
 			continue
 		}
 		if code := location.Spec.Topology[locationsv1alpha1.TopologyCityCodeKey]; code != "" {
@@ -113,12 +130,12 @@ func cityCodeCandidates(list locationsv1alpha1.LocationList) []string {
 }
 
 // selectorCandidates returns every distinct key=value pair in the topology of
-// Ready locations, sorted, which is what a selector on those locations can
-// match.
-func selectorCandidates(list locationsv1alpha1.LocationList) []string {
+// the locations the filter accepts, sorted, which is what a selector on those
+// locations can match.
+func selectorCandidates(list locationsv1alpha1.LocationList, accept placeableFilter) []string {
 	pairs := sets.New[string]()
 	for _, location := range list.Items {
-		if !locationIsReady(location) {
+		if accept != nil && !accept(location) {
 			continue
 		}
 		for key, value := range location.Spec.Topology {
@@ -157,6 +174,22 @@ func completeCommaList(candidates []string, toComplete string) ([]string, cobra.
 		completions = append(completions, prefix+candidate)
 	}
 	return completions, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+}
+
+// availableLocations returns the locations where compute is available, and
+// whether the project serves availability at all. On any failure it reports
+// the gate as not enforced, so completion degrades to Ready locations rather
+// than offering nothing.
+func availableLocations(cmd *cobra.Command) (sets.Set[string], bool) {
+	c, err := NewClient(ProjectFromCmd(cmd))
+	if err != nil {
+		return nil, false
+	}
+	available, enforced, err := locations.AvailableLocations(context.Background(), c)
+	if err != nil {
+		return nil, false
+	}
+	return available, enforced
 }
 
 func projectedLocations(cmd *cobra.Command) (locationsv1alpha1.LocationList, bool) {

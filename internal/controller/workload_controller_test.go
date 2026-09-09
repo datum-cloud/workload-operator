@@ -16,9 +16,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
+
+// newTestComputeAvailability returns the record the platform mirrors into a
+// project to say compute is deployed and validated at the location.
+func newTestComputeAvailability(location string) *servicesv1alpha1.ServiceAvailability {
+	return &servicesv1alpha1.ServiceAvailability{
+		ObjectMeta: metav1.ObjectMeta{Name: "compute--" + location},
+		Spec: servicesv1alpha1.ServiceAvailabilitySpec{
+			ServiceRef:  servicesv1alpha1.ServiceRef{Name: locations.ComputeServiceName},
+			LocationRef: servicesv1alpha1.LocationRef{Name: location},
+		},
+		Status: servicesv1alpha1.ServiceAvailabilityStatus{
+			Conditions: []metav1.Condition{{Type: "Available", Status: metav1.ConditionTrue}},
+		},
+	}
+}
 
 // newTestLocationBinding builds the projection a project control plane holds
 // today for a location it may place workloads at.
@@ -122,7 +139,7 @@ func TestGetDeploymentsForWorkload_InitializesReplicas(t *testing.T) {
 	require.NoError(t, locationsv1alpha1.AddToScheme(s))
 	cl := fake.NewClientBuilder().
 		WithScheme(s).
-		WithObjects(location).
+		WithObjects(location, newTestComputeAvailability(testLocationName)).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
 	r := &WorkloadReconciler{}
@@ -377,6 +394,9 @@ func TestGetDeploymentsForWorkload_LocationSelector(t *testing.T) {
 			newTestLocationBinding("dfw-b", "DFW"),
 			newTestLocationBinding("dfw-a", "DFW"),
 			newTestLocationBinding(testOtherLocationName, "ORD"),
+			newTestComputeAvailability("dfw-a"),
+			newTestComputeAvailability("dfw-b"),
+			newTestComputeAvailability(testOtherLocationName),
 		).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
@@ -433,7 +453,11 @@ func TestGetDeploymentsForWorkload_LocationSelectorFollowsLocations(t *testing.T
 
 	cl := fake.NewClientBuilder().
 		WithScheme(newNetworkingScheme()).
-		WithObjects(newTestLocationBinding(testLocationName, "DFW"), newTestLocationBinding(testOtherLocationName, "ORD"), stale).
+		WithObjects(
+			newTestLocationBinding(testLocationName, "DFW"), newTestLocationBinding(testOtherLocationName, "ORD"),
+			newTestComputeAvailability(testLocationName), newTestComputeAvailability(testOtherLocationName),
+			stale,
+		).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
 	r := &WorkloadReconciler{}
@@ -489,4 +513,56 @@ func TestReconcileWorkloadStatus_ReportsResolvedLocations(t *testing.T) {
 
 	require.Len(t, workload.Status.Placements, 1)
 	assert.Equal(t, []locationsv1alpha1.LocationReference{{Name: testLocationName}, {Name: testOtherLocationName}}, workload.Status.Placements[0].Locations)
+}
+
+// TestGetDeploymentsForWorkload_RequiresComputeAvailability verifies the
+// availability gate: a Ready location the project may use, but where compute
+// is not available, receives no deployment, whether named or selected.
+func TestGetDeploymentsForWorkload_RequiresComputeAvailability(t *testing.T) {
+	t.Parallel()
+
+	workload := &computev1alpha.Workload{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rdTestWorkloadName,
+			Namespace: testDefaultNamespace,
+			UID:       types.UID("workload-uid"),
+		},
+		Spec: computev1alpha.WorkloadSpec{
+			Placements: []computev1alpha.WorkloadPlacement{
+				{
+					Name:          "named",
+					Locations:     []locationsv1alpha1.LocationReference{{Name: testLocationName}, {Name: testOtherLocationName}},
+					ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
+				},
+				{
+					Name: "selected",
+					LocationSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key: networkingv1alpha.TopologyCityCodeKey, Operator: metav1.LabelSelectorOpExists,
+						}},
+					},
+					ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
+				},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newNetworkingScheme()).
+		WithObjects(
+			newTestLocationBinding(testLocationName, "DFW"),
+			newTestLocationBinding(testOtherLocationName, "ORD"),
+			// Compute is only available in one of the two locations.
+			newTestComputeAvailability(testLocationName),
+		).
+		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
+		Build()
+	r := &WorkloadReconciler{}
+
+	desired, _, err := r.getDeploymentsForWorkload(context.Background(), cl, workload)
+	require.NoError(t, err)
+	require.Len(t, desired, 2, "each placement lands only where compute is available")
+	for _, deployment := range desired {
+		assert.Equal(t, testLocationName, deployment.Spec.LocationRef.Name)
+	}
 }

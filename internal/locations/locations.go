@@ -26,7 +26,13 @@ import (
 
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
+
+// ComputeServiceName is the name the platform records compute availability
+// under: a ServiceAvailability whose spec.serviceRef.name is this value says
+// compute is deployed and validated at spec.locationRef.name.
+const ComputeServiceName = "compute"
 
 const (
 	// TopologyCityCodeKey is the topology key holding a location's city.
@@ -68,11 +74,25 @@ type PlacementLocation struct {
 	Name     string
 	Topology map[string]string
 
-	// Ready reports whether the location accepts placements. A Location read
+	// Ready reports whether the location itself is serving. A Location read
 	// from the locations service is Ready when its Ready condition is true. A
 	// LocationBinding carries no readiness contract that compute reads, so
 	// every binding is Ready.
 	Ready bool
+
+	// ServiceAvailable reports whether compute is deployed and validated at
+	// the location, read from the ServiceAvailability the platform mirrors
+	// into the project. A location can be Ready for the platform generally
+	// yet have no compute cell behind it; this is what tells the two apart.
+	// A control plane that does not serve the kind enforces no such gate, so
+	// every location there is available.
+	ServiceAvailable bool
+}
+
+// Placeable reports whether a placement may run at the location: it is Ready
+// and compute is available there.
+func (l PlacementLocation) Placeable() bool {
+	return l.Ready && l.ServiceAvailable
 }
 
 // CityCode returns the city the location serves, and whether it declares one.
@@ -114,7 +134,7 @@ func ListPlacementLocations(ctx context.Context, c client.Client, source Source)
 				Ready:    true,
 			})
 		}
-		return found, nil
+		return markServiceAvailability(ctx, c, found)
 	}
 
 	var list locationsv1alpha1.LocationList
@@ -133,7 +153,62 @@ func ListPlacementLocations(ctx context.Context, c client.Client, source Source)
 			Ready:    apimeta.IsStatusConditionTrue(location.Status.Conditions, locationsv1alpha1.LocationConditionReady),
 		})
 	}
+	return markServiceAvailability(ctx, c, found)
+}
+
+// markServiceAvailability sets ServiceAvailable on each location from the
+// ServiceAvailability records the platform mirrors into the project.
+//
+// A location is available when a record for the compute service names it and
+// reports Available. A control plane that does not serve the kind has no
+// availability to consult, so every location is marked available and the
+// Ready gate alone decides, which is what placement did before the platform
+// began mirroring availability.
+func markServiceAvailability(ctx context.Context, c client.Client, found []PlacementLocation) ([]PlacementLocation, error) {
+	available, enforced, err := AvailableLocations(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	for i := range found {
+		found[i].ServiceAvailable = !enforced || available.Has(found[i].Name)
+	}
 	return found, nil
+}
+
+// AvailableLocations returns the names of the locations where compute is
+// available, and whether the control plane serves availability at all. When
+// it does not, enforced is false and the set is empty.
+func AvailableLocations(ctx context.Context, c client.Client) (available sets.Set[string], enforced bool, err error) {
+	var list servicesv1alpha1.ServiceAvailabilityList
+	if err := c.List(ctx, &list); err != nil {
+		if kindNotInstalled(err) {
+			return sets.Set[string]{}, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to list service availabilities: %w", err)
+	}
+
+	available = sets.Set[string]{}
+	for _, availability := range list.Items {
+		if availability.Spec.ServiceRef.Name != ComputeServiceName {
+			continue
+		}
+		if apimeta.IsStatusConditionTrue(availability.Status.Conditions, "Available") {
+			available.Insert(availability.Spec.LocationRef.Name)
+		}
+	}
+	return available, true, nil
+}
+
+// ServiceAvailabilityGVK returns the kind a controller watches to learn that
+// compute availability at a location changed.
+func ServiceAvailabilityGVK() schema.GroupVersionKind {
+	return servicesv1alpha1.GroupVersion.WithKind("ServiceAvailability")
+}
+
+// ServesServiceAvailabilityKind reports whether the control plane serves
+// ServiceAvailability, so a watch on it is safe to register.
+func ServesServiceAvailabilityKind(mapper apimeta.RESTMapper) (bool, error) {
+	return servesKind(mapper, ServiceAvailabilityGVK())
 }
 
 // ListServingLocations returns the locations delivered to a cell.
@@ -195,7 +270,7 @@ func Select(found []PlacementLocation, selector *metav1.LabelSelector) ([]Placem
 
 	var matched []PlacementLocation
 	for _, location := range found {
-		if location.Ready && sel.Matches(labels.Set(location.Topology)) {
+		if location.Placeable() && sel.Matches(labels.Set(location.Topology)) {
 			matched = append(matched, location)
 		}
 	}
@@ -245,14 +320,19 @@ func ServesPlacementLocationKind(mapper apimeta.RESTMapper, source Source) (bool
 	if err != nil {
 		return false, err
 	}
+	return servesKind(mapper, gvk)
+}
 
+// servesKind reports whether the control plane behind the mapper serves the
+// kind. A kind that is not installed reads as not served; any other mapper
+// failure is returned, since it says nothing about the kind.
+func servesKind(mapper apimeta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
 	if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
 		if kindNotInstalled(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to determine whether %s is served: %w", gvk, err)
 	}
-
 	return true, nil
 }
 
@@ -324,11 +404,12 @@ func otherSource(source Source) Source {
 	return SourceLocations
 }
 
-// ReadyNames returns the names of the given locations that accept placements.
-func ReadyNames(found []PlacementLocation) sets.Set[string] {
+// PlaceableNames returns the names of the given locations a placement may run
+// at: those that are Ready and where compute is available.
+func PlaceableNames(found []PlacementLocation) sets.Set[string] {
 	names := sets.Set[string]{}
 	for _, location := range found {
-		if location.Ready {
+		if location.Placeable() {
 			names.Insert(location.Name)
 		}
 	}

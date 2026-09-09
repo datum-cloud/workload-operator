@@ -140,6 +140,7 @@ func TestControllerRoleGrantsPlacementLocationWatches(t *testing.T) {
 		{"networking.datumapis.com", "servinglocations"},
 		{"locations.miloapis.com", "locations"},
 		{"locations.miloapis.com", "servinglocations"},
+		{"services.miloapis.com", "serviceavailabilities"},
 	} {
 		for _, verb := range []string{"get", "list", "watch"} {
 			assert.Truef(t, granted(resource.group, resource.name, verb),

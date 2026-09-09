@@ -23,6 +23,7 @@ import (
 	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 
 	"go.datum.net/compute/internal/controller/instancecontrol"
 )
@@ -44,6 +45,7 @@ func newNetworkingScheme() *runtime.Scheme {
 	_ = computev1alpha.AddToScheme(s)
 	_ = networkingv1alpha.AddToScheme(s)
 	_ = locationsv1alpha1.AddToScheme(s)
+	_ = servicesv1alpha1.AddToScheme(s)
 	return s
 }
 

@@ -519,11 +519,11 @@ var catalog = []ReasonInfo{
 		ConditionTypes: []string{computev1alpha.WorkloadAvailable},
 		Actionability:  ActionabilityUser,
 		Explanation: "This placement resolves to no location, so nothing was created for it. Either none " +
-			"of the locations it names is ready, or its location selector matches none of the " +
-			"project's ready locations.",
-		Remediation: "Compare the placement against the project's locations and their topology " +
-			"(city code, region). Name a location that exists, or widen the selector until it " +
-			"matches one.",
+			"of the locations it names is ready with compute available, or its location selector " +
+			"matches none of the project's locations that are.",
+		Remediation: "Compare the placement against the project's locations, their topology " +
+			"(city code, region), and where compute is available. Name a location that exists and " +
+			"offers compute, or widen the selector until it matches one.",
 		Skill: SkillWorkloadNotAvailable,
 	},
 

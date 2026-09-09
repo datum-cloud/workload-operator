@@ -45,18 +45,29 @@ func completionTestList() locationsv1alpha1.LocationList {
 	}}
 }
 
+// readyOnly is the filter a placement is held to when no availability gate is
+// enforced; onlyDFWA is the same with compute available in one location.
+var (
+	readyOnly placeableFilter = locationIsReady
+	onlyDFWA  placeableFilter = func(location locationsv1alpha1.Location) bool {
+		return locationIsReady(location) && location.Name == completionTestDFWA
+	}
+)
+
 func TestLocationCandidates(t *testing.T) {
 	t.Parallel()
 	list := completionTestList()
-	assert.Equal(t, []string{completionTestDFWA, completionTestDFWB, "lhr", completionTestORD}, locationCandidates(list, false),
+	assert.Equal(t, []string{completionTestDFWA, completionTestDFWB, "lhr", completionTestORD}, locationCandidates(list, nil),
 		"list filters may name a location that is not Ready")
-	assert.Equal(t, []string{completionTestDFWA, completionTestDFWB, completionTestORD}, locationCandidates(list, true),
+	assert.Equal(t, []string{completionTestDFWA, completionTestDFWB, completionTestORD}, locationCandidates(list, readyOnly),
 		"a placement may only name a Ready location")
+	assert.Equal(t, []string{completionTestDFWA}, locationCandidates(list, onlyDFWA),
+		"the availability gate narrows what deploy offers")
 }
 
 func TestCityCodeCandidates(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, []string{completionTestCityDFW, "ORD"}, cityCodeCandidates(completionTestList()),
+	assert.Equal(t, []string{completionTestCityDFW, "ORD"}, cityCodeCandidates(completionTestList(), readyOnly),
 		"city codes are deduplicated and only Ready locations count")
 }
 
@@ -67,7 +78,7 @@ func TestSelectorCandidates(t *testing.T) {
 		locationsv1alpha1.TopologyCityCodeKey + "=ORD",
 		completionTestRegionKey + "=us-central",
 		completionTestRegionKey + "=us-south",
-	}, selectorCandidates(completionTestList()),
+	}, selectorCandidates(completionTestList(), readyOnly),
 		"every topology key=value pair of a Ready location is offered once")
 }
 

@@ -97,7 +97,7 @@ func TestGetDeploymentsForWorkload_LocationsSource(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(newLocationsServiceScheme()).
-		WithObjects(newLocationsServiceLocation(testLocationName, locSourceTestCityCode)).
+		WithObjects(newLocationsServiceLocation(testLocationName, locSourceTestCityCode), newTestComputeAvailability(testLocationName)).
 		WithIndex(&computev1alpha.WorkloadDeployment{}, deploymentWorkloadUIDIndex, deploymentWorkloadUIDIndexFunc).
 		Build()
 

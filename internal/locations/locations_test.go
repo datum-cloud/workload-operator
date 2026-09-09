@@ -12,12 +12,14 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
 
 const (
@@ -35,7 +37,33 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	s := runtime.NewScheme()
 	require.NoError(t, networkingv1alpha.AddToScheme(s))
 	require.NoError(t, locationsv1alpha1.AddToScheme(s))
+	require.NoError(t, servicesv1alpha1.AddToScheme(s))
 	return s
+}
+
+// newAvailability returns the mirrored record saying the named service is
+// deployed at the named location, Available or not.
+func newAvailability(service, location string, available bool) *servicesv1alpha1.ServiceAvailability {
+	status := metav1.ConditionFalse
+	if available {
+		status = metav1.ConditionTrue
+	}
+	return &servicesv1alpha1.ServiceAvailability{
+		ObjectMeta: metav1.ObjectMeta{Name: service + "--" + location},
+		Spec: servicesv1alpha1.ServiceAvailabilitySpec{
+			ServiceRef:  servicesv1alpha1.ServiceRef{Name: service},
+			LocationRef: servicesv1alpha1.LocationRef{Name: location},
+		},
+		Status: servicesv1alpha1.ServiceAvailabilityStatus{
+			Conditions: []metav1.Condition{{Type: "Available", Status: status}},
+		},
+	}
+}
+
+// newComputeAvailability returns an Available record for compute at the
+// location.
+func newComputeAvailability(location string) *servicesv1alpha1.ServiceAvailability {
+	return newAvailability(ComputeServiceName, location, true)
 }
 
 func newBinding(name, cityCode string) *networkingv1alpha.LocationBinding {
@@ -56,6 +84,13 @@ func newLocation(name, cityCode string) *locationsv1alpha1.Location {
 			Topology:         map[string]string{TopologyCityCodeKey: cityCode},
 		},
 	}
+}
+
+// newReadyLocation is newLocation with its Ready condition set.
+func newReadyLocation(name, cityCode string) *locationsv1alpha1.Location {
+	location := newLocation(name, cityCode)
+	location.Status.Conditions = []metav1.Condition{{Type: locationsv1alpha1.LocationConditionReady, Status: metav1.ConditionTrue}}
+	return location
 }
 
 // TestTopologyKeysAgreeAcrossSources guards the migration's central assumption:
@@ -285,11 +320,11 @@ func TestSelect(t *testing.T) {
 
 	region := "topology.datum.net/region"
 	found := []PlacementLocation{
-		{Name: testLocationORD, Topology: map[string]string{TopologyCityCodeKey: testOtherCityCode, region: "us-central"}, Ready: true},
-		{Name: testLocationDFWB, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true},
-		{Name: testLocationDFWA, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true},
+		{Name: testLocationORD, Topology: map[string]string{TopologyCityCodeKey: testOtherCityCode, region: "us-central"}, Ready: true, ServiceAvailable: true},
+		{Name: testLocationDFWB, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true, ServiceAvailable: true},
+		{Name: testLocationDFWA, Topology: map[string]string{TopologyCityCodeKey: testCityCode, region: "us-south"}, Ready: true, ServiceAvailable: true},
 		{Name: "dfw-down", Topology: map[string]string{TopologyCityCodeKey: testCityCode}, Ready: false},
-		{Name: "nowhere", Ready: true},
+		{Name: "nowhere", Ready: true, ServiceAvailable: true},
 	}
 
 	names := func(locations []PlacementLocation) []string {
@@ -374,4 +409,61 @@ func TestPlacementLocationObject(t *testing.T) {
 
 	_, err = PlacementLocationObject("Nonsense")
 	require.Error(t, err)
+}
+
+// TestListPlacementLocations_ServiceAvailability covers the availability gate
+// under both sources: a location is placeable only when a record for compute
+// names it and reports Available. A record for another service, or one that
+// is not Available, leaves the location Ready but not placeable.
+func TestListPlacementLocations_ServiceAvailability(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name    string
+		source  Source
+		objects []client.Object
+	}{
+		{
+			name:   "network services",
+			source: SourceNetworkServices,
+			objects: []client.Object{
+				newBinding(testLocationDFWA, testCityCode),
+				newBinding(testLocationORD, testOtherCityCode),
+				newBinding("lhr", "LHR"),
+			},
+		},
+		{
+			name:   "locations service",
+			source: SourceLocations,
+			objects: []client.Object{
+				newReadyLocation(testLocationDFWA, testCityCode),
+				newReadyLocation(testLocationORD, testOtherCityCode),
+				newReadyLocation("lhr", "LHR"),
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			objects := append(tt.objects,
+				newComputeAvailability(testLocationDFWA),
+				newAvailability(ComputeServiceName, testLocationORD, false),
+				newAvailability("networking-datumapis-com", "lhr", true),
+			)
+			cl := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objects...).Build()
+
+			found, err := ListPlacementLocations(context.Background(), cl, tt.source)
+			require.NoError(t, err)
+			require.Len(t, found, 3, "availability narrows what is placeable, not what is listed")
+
+			byName := map[string]PlacementLocation{}
+			for _, location := range found {
+				byName[location.Name] = location
+			}
+			assert.True(t, byName[testLocationDFWA].Placeable(), "an Available compute record makes the location placeable")
+			assert.False(t, byName[testLocationORD].Placeable(), "a compute record that is not Available does not")
+			assert.False(t, byName["lhr"].Placeable(), "another service's availability says nothing about compute")
+			assert.Equal(t, []string{testLocationDFWA}, sets.List(PlaceableNames(found)))
+		})
+	}
 }

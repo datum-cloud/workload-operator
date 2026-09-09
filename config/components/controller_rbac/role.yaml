@@ -137,6 +137,7 @@ rules:
 - apiGroups:
   - services.miloapis.com
   resources:
+  - serviceavailabilities
   - serviceconsumers
   - services
   verbs:

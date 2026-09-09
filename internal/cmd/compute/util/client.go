@@ -9,6 +9,7 @@ import (
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 	quotav1alpha1 "go.miloapis.com/milo/pkg/apis/quota/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,6 +57,9 @@ func NewClient(project string) (client.Client, error) {
 	if err := locationsv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("registering locations scheme: %w", err)
 	}
+	if err := servicesv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("registering services scheme: %w", err)
+	}
 	if err := quotav1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("registering quota scheme: %w", err)
 	}
@@ -84,6 +88,9 @@ func NewPlatformClient() (client.Client, error) {
 	scheme := runtime.NewScheme()
 	if err := locationsv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("registering locations scheme: %w", err)
+	}
+	if err := servicesv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("registering services scheme: %w", err)
 	}
 	if err := quotav1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("registering quota scheme: %w", err)

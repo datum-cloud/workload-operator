@@ -48,9 +48,9 @@ type workloadWebhook struct {
 }
 
 // readyLocations describes the locations a placement may run at: the
-// locations projected into the project control plane that are Ready to accept
-// workloads, as the names a placement may list and the topology a selector is
-// matched against.
+// locations projected into the project control plane that are Ready and where
+// compute is available, as the names a placement may list and the topology a
+// selector is matched against.
 type readyLocations struct {
 	names      []string
 	topologies map[string]map[string]string
@@ -63,11 +63,11 @@ func (r *workloadWebhook) readyLocations(ctx context.Context, c client.Client) (
 	}
 
 	ready := readyLocations{
-		names:      sets.List(locations.ReadyNames(placementLocations)),
+		names:      sets.List(locations.PlaceableNames(placementLocations)),
 		topologies: make(map[string]map[string]string),
 	}
 	for _, location := range placementLocations {
-		if location.Ready {
+		if location.Placeable() {
 			ready.topologies[location.Name] = location.Topology
 		}
 	}

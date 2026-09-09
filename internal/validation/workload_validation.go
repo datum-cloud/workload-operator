@@ -85,8 +85,9 @@ type WorkloadValidationOptions struct {
 	Workload         *computev1alpha.Workload
 	ValidLocations   []string
 
-	// LocationTopologies is the topology of every Ready location, keyed by
-	// name. A placement's locationSelector must match at least one of them.
+	// LocationTopologies is the topology of every location a placement may run
+	// at (Ready, with compute available), keyed by name. A placement's
+	// locationSelector must match at least one of them.
 	LocationTopologies map[string]map[string]string
 
 	// RuntimeClasses is the catalog of execution tiers this control plane
@@ -267,8 +268,8 @@ func validateMetricTarget(target computev1alpha.MetricTarget, fieldPath *field.P
 }
 
 // validateLocationSelector checks a placement's selector the way the workload
-// controller will evaluate it: well formed, non-empty, and matching at least
-// one Ready location's topology. A selector that matches nothing is rejected
+// controller will evaluate it: well formed, non-empty, and matching the
+// topology of at least one location where compute is available. A selector that matches nothing is rejected
 // for the same reason an unknown location name is: storing it would admit a
 // placement that never runs anywhere.
 func validateLocationSelector(selector *metav1.LabelSelector, fieldPath *field.Path, opts WorkloadValidationOptions) field.ErrorList {
@@ -300,5 +301,5 @@ func validateLocationSelector(selector *metav1.LabelSelector, fieldPath *field.P
 	}
 	sort.Strings(names)
 	return append(allErrs, field.Invalid(fieldPath, sel.String(), fmt.Sprintf(
-		"matches none of the Ready locations (%s)", strings.Join(names, ", "))))
+		"matches none of the locations where compute is available (%s)", strings.Join(names, ", "))))
 }
