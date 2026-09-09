@@ -759,8 +759,9 @@ spec:
                                         type: object
                                       type: array
                                     image:
-                                      description: The fully qualified container image
-                                        name.
+                                      description: |-
+                                        The container image to run. Must include a registry, e.g.
+                                        "ghcr.io/acme/api:1.4.2" rather than "acme/api:1.4.2".
                                       type: string
                                     name:
                                       description: The name of the container.

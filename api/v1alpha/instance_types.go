@@ -127,7 +127,8 @@ type SandboxContainer struct {
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
-	// The fully qualified container image name.
+	// The container image to run. Must include a registry, e.g.
+	// "ghcr.io/acme/api:1.4.2" rather than "acme/api:1.4.2".
 	//
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`

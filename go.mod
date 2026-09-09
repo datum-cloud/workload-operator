@@ -31,7 +31,10 @@ require (
 	sigs.k8s.io/multicluster-runtime v0.23.3
 )
 
-require github.com/modelcontextprotocol/go-sdk v1.7.0
+require (
+	github.com/distribution/reference v0.6.0
+	github.com/modelcontextprotocol/go-sdk v1.7.0
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -46,7 +49,6 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.4 // indirect
 	github.com/containerd/ttrpc v1.2.8 // indirect
 	github.com/containerd/typeurl/v2 v2.3.0 // indirect
-	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -62,8 +64,6 @@ require (
 	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -133,7 +133,6 @@ require (
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/stoewer/go-strcase v1.3.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.miloapis.com/service-catalog v0.4.0
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

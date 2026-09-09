@@ -5,6 +5,7 @@ package validation
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -699,5 +700,46 @@ func TestWorkloadWithReferencedDataE2E(t *testing.T) {
 	errs := ValidateWorkloadCreate(workload, opts)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors, got: %v", errs)
+	}
+}
+
+// TestValidateContainerImage covers different image reference variations.
+func TestValidateContainerImage(t *testing.T) {
+	imagePath := field.NewPath("image")
+
+	cases := map[string]struct {
+		image          string
+		expectedErrors field.ErrorList
+	}{
+		"bare name has no registry": {
+			image:          testImageNoRegistry,
+			expectedErrors: field.ErrorList{field.Invalid(imagePath, "", "")},
+		},
+		"namespaced name has no registry": {
+			image:          "myname/myapp:v1",
+			expectedErrors: field.ErrorList{field.Invalid(imagePath, "", "")},
+		},
+		"invalid reference syntax": {
+			image:          "ghcr.io/acme/UPPERCASE_REPO:v1",
+			expectedErrors: field.ErrorList{field.Invalid(imagePath, "", "")},
+		},
+		"qualified with tag": {
+			image: testImageQualified,
+		},
+		"qualified without tag": {
+			image: "ghcr.io/acme/api",
+		},
+		"localhost with port": {
+			image: "localhost:5000/foo:bar",
+		},
+		"digest pinned": {
+			image: "ghcr.io/acme/api@sha256:" + strings.Repeat("a", 64),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cmpErrs(t, tc.expectedErrors, validateContainerImage(tc.image, imagePath))
+		})
 	}
 }
