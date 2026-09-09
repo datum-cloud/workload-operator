@@ -3,8 +3,11 @@ package util
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
@@ -36,37 +39,124 @@ func CompleteInstanceNames(cmd *cobra.Command, args []string, _ string) ([]strin
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
-// CompleteLocations returns the projected locations available to the project.
-func CompleteLocations(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+// CompleteLocations completes a --location flag with every location projected
+// into the project, whether or not it is Ready. List and describe commands
+// filter by location, and a location that is no longer Ready may still have
+// deployments worth finding.
+func CompleteLocations(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	list, ok := projectedLocations(cmd)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	return completeCommaList(locationCandidates(list, false), toComplete)
+}
+
+// CompletePlacementLocations completes a deploy-time --location flag with the
+// locations a placement may name: those projected into the project that are
+// Ready. Admission rejects any other, so they are not offered.
+func CompletePlacementLocations(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	list, ok := projectedLocations(cmd)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeCommaList(locationCandidates(list, true), toComplete)
+}
+
+// CompleteCityCodes completes --city with the city codes of the project's
+// Ready locations.
+func CompleteCityCodes(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	list, ok := projectedLocations(cmd)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeCommaList(cityCodeCandidates(list), toComplete)
+}
+
+// CompleteLocationSelector completes --location-selector with the key=value
+// pairs found in the topology of the project's Ready locations, so a user can
+// discover which topology keys exist without reading each Location.
+func CompleteLocationSelector(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	list, ok := projectedLocations(cmd)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeCommaList(selectorCandidates(list), toComplete)
+}
+
+// locationCandidates returns location names, sorted, optionally only the
+// Ready ones.
+func locationCandidates(list locationsv1alpha1.LocationList, readyOnly bool) []string {
 	names := make([]string, 0, len(list.Items))
 	for _, location := range list.Items {
+		if readyOnly && !locationIsReady(location) {
+			continue
+		}
 		names = append(names, location.Name)
 	}
 	sort.Strings(names)
-	return names, cobra.ShellCompDirectiveNoFileComp
+	return names
 }
 
-// CompleteCityCodes returns unique city codes from projected Locations.
-func CompleteCityCodes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-	list, ok := projectedLocations(cmd)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	seen := make(map[string]bool)
-	var codes []string
+// cityCodeCandidates returns the distinct city codes of Ready locations,
+// sorted.
+func cityCodeCandidates(list locationsv1alpha1.LocationList) []string {
+	codes := sets.New[string]()
 	for _, location := range list.Items {
-		code := location.Spec.Topology[locationsv1alpha1.TopologyCityCodeKey]
-		if code != "" && !seen[code] {
-			seen[code] = true
-			codes = append(codes, code)
+		if !locationIsReady(location) {
+			continue
+		}
+		if code := location.Spec.Topology[locationsv1alpha1.TopologyCityCodeKey]; code != "" {
+			codes.Insert(code)
 		}
 	}
-	sort.Strings(codes)
-	return codes, cobra.ShellCompDirectiveNoFileComp
+	return sets.List(codes)
+}
+
+// selectorCandidates returns every distinct key=value pair in the topology of
+// Ready locations, sorted, which is what a selector on those locations can
+// match.
+func selectorCandidates(list locationsv1alpha1.LocationList) []string {
+	pairs := sets.New[string]()
+	for _, location := range list.Items {
+		if !locationIsReady(location) {
+			continue
+		}
+		for key, value := range location.Spec.Topology {
+			pairs.Insert(key + "=" + value)
+		}
+	}
+	return sets.List(pairs)
+}
+
+func locationIsReady(location locationsv1alpha1.Location) bool {
+	return apimeta.IsStatusConditionTrue(location.Status.Conditions, locationsv1alpha1.LocationConditionReady)
+}
+
+// completeCommaList completes the last element of a comma-separated flag
+// value. The shell matches candidates against the whole value typed so far,
+// so each candidate is returned with the already-typed elements in front of
+// it; elements already present are not offered again. No space is appended,
+// so the user can keep typing a comma for the next element.
+func completeCommaList(candidates []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	prefix := ""
+	chosen := sets.New[string]()
+	if i := strings.LastIndex(toComplete, ","); i >= 0 {
+		prefix = toComplete[:i+1]
+		for _, element := range strings.Split(toComplete[:i], ",") {
+			if element != "" {
+				chosen.Insert(element)
+			}
+		}
+	}
+
+	completions := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if chosen.Has(candidate) {
+			continue
+		}
+		completions = append(completions, prefix+candidate)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
 }
 
 func projectedLocations(cmd *cobra.Command) (locationsv1alpha1.LocationList, bool) {

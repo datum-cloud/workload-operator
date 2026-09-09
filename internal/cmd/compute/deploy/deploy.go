@@ -96,7 +96,8 @@ a fix is applied — same as 'datumctl compute build --fix'.`,
 	cmd.Flags().Int32Var(&opts.port, "port", 0, "Port to expose on the workload (optional)")
 	cmd.Flags().StringVarP(&opts.file, "file", "f", "", "Path to a workload manifest file")
 	cmd.Flags().BoolVarP(&opts.yes, "yes", "y", false, "Skip confirmation prompts")
-	_ = cmd.RegisterFlagCompletionFunc("location", util.CompleteLocations)
+	_ = cmd.RegisterFlagCompletionFunc("location", util.CompletePlacementLocations)
+	_ = cmd.RegisterFlagCompletionFunc("location-selector", util.CompleteLocationSelector)
 	_ = cmd.RegisterFlagCompletionFunc("city", util.CompleteCityCodes)
 
 	return cmd
