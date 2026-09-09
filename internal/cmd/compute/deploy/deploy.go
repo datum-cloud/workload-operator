@@ -13,7 +13,6 @@ import (
 	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -29,17 +28,16 @@ import (
 )
 
 type options struct {
-	image                string
-	build                string
-	instanceType         string
-	locations            []string
-	locationSelector     string
-	cities               []string
-	allMatchingLocations bool
-	min                  int32
-	port                 int32
-	file                 string
-	yes                  bool
+	image            string
+	build            string
+	instanceType     string
+	locations        []string
+	locationSelector string
+	cities           []string
+	min              int32
+	port             int32
+	file             string
+	yes              bool
 }
 
 func Command() *cobra.Command {
@@ -70,8 +68,11 @@ a fix is applied — same as 'datumctl compute build --fix'.`,
   # Build from another directory
   datumctl compute deploy api --build=./api --image=ghcr.io/acme/api:1.4.2 --location=us-east-1,eu-west-1
 
-  # Select locations by topology instead of naming them
-  datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --location-selector='topology.datum.net/city-code=DFW'
+  # Deploy to every location in one or more cities
+  datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --city=DFW,IAD
+
+  # Select locations by any topology label
+  datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --location-selector='topology.datum.net/region=us-east-1'
 
   # Interactive mode
   datumctl compute deploy
@@ -90,8 +91,7 @@ a fix is applied — same as 'datumctl compute build --fix'.`,
 	cmd.Flags().StringVar(&opts.instanceType, "instance-type", "datumcloud/d1-standard-2", "Instance type (e.g. datumcloud/d1-standard-2)")
 	cmd.Flags().StringSliceVar(&opts.locations, "location", nil, "One or more locations to deploy to (e.g. us-east-1,eu-west-1)")
 	cmd.Flags().StringVar(&opts.locationSelector, "location-selector", "", "Select every location whose topology matches a label selector (e.g. 'topology.datum.net/city-code=DFW' or 'topology.datum.net/region in (us-east-1,eu-west-1)')")
-	cmd.Flags().StringSliceVar(&opts.cities, "city", nil, "Resolve a city code to an available location (e.g. IAD)")
-	cmd.Flags().BoolVar(&opts.allMatchingLocations, "all-matching-locations", false, "Deploy to every location matching --city")
+	cmd.Flags().StringSliceVar(&opts.cities, "city", nil, "Deploy to every location in these cities (e.g. DFW,IAD); shorthand for a --location-selector on topology.datum.net/city-code")
 	cmd.Flags().Int32Var(&opts.min, "min", 1, "Minimum number of instances per location")
 	cmd.Flags().Int32Var(&opts.port, "port", 0, "Port to expose on the workload (optional)")
 	cmd.Flags().StringVarP(&opts.file, "file", "f", "", "Path to a workload manifest file")
@@ -156,7 +156,7 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 		}
 	}
 	if placementFlags == 0 {
-		return fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); use --city to resolve a city code, or --location-selector to select locations by topology")
+		return fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); or use --city to deploy to every location in a city, or --location-selector to select locations by topology")
 	}
 	if placementFlags > 1 {
 		return fmt.Errorf("--location, --city, and --location-selector are mutually exclusive")
@@ -168,6 +168,9 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 			return fmt.Errorf("invalid --location-selector %q: %w", opts.locationSelector, err)
 		}
 		locationSelector = parsed
+	}
+	if len(opts.cities) > 0 {
+		locationSelector = citySelector(opts.cities)
 	}
 	instanceType := opts.instanceType
 	if instanceType == "" {
@@ -182,13 +185,6 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 	ctx := context.Background()
 	out := cmd.OutOrStdout()
 	locations := opts.locations
-	if len(opts.cities) > 0 {
-		locations, err = resolveCities(ctx, c, opts.cities, opts.allMatchingLocations)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "Resolved --city to locations: %s\n", strings.Join(locations, ", "))
-	}
 
 	if err := ensureNetwork(ctx, cmd, c, "default", project, opts); err != nil {
 		return err
@@ -511,32 +507,6 @@ func manifestDiff(existing, desired computev1alpha.Workload) []string {
 	return lines
 }
 
-func resolveCities(ctx context.Context, c client.Client, cities []string, all bool) ([]string, error) {
-	var list locationsv1alpha1.LocationList
-	if err := c.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("listing project locations: %w", err)
-	}
-	var resolved []string
-	for _, city := range cities {
-		var matches []string
-		for _, location := range list.Items {
-			ready := apimeta.FindStatusCondition(location.Status.Conditions, locationsv1alpha1.LocationConditionReady)
-			if location.Spec.Topology[locationsv1alpha1.TopologyCityCodeKey] != city || ready == nil || ready.Status != metav1.ConditionTrue {
-				continue
-			}
-			matches = append(matches, location.Name)
-		}
-		if len(matches) == 0 {
-			return nil, fmt.Errorf("city %q has no Ready locations; run 'datumctl get locations' to see available locations", city)
-		}
-		if len(matches) > 1 && !all {
-			return nil, fmt.Errorf("city %q matches multiple Ready locations (%s); use --location to choose one or --all-matching-locations", city, strings.Join(matches, ", "))
-		}
-		resolved = append(resolved, matches...)
-	}
-	return resolved, nil
-}
-
 // describePlacementLocations says where a placement runs the way the CLI
 // prints it: the locations it names, or the selector it resolves through.
 func describePlacementLocations(p computev1alpha.WorkloadPlacement) string {
@@ -548,4 +518,22 @@ func describePlacementLocations(p computev1alpha.WorkloadPlacement) string {
 		names = append(names, ref.Name)
 	}
 	return fmt.Sprintf("locations=[%s]", strings.Join(names, ", "))
+}
+
+// citySelector is the selector --city stands for: every location whose
+// topology places it in one of the given cities. One city is a plain
+// equality; several become an In expression.
+func citySelector(cities []string) *metav1.LabelSelector {
+	if len(cities) == 1 {
+		return &metav1.LabelSelector{
+			MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: cities[0]},
+		}
+	}
+	return &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      locationsv1alpha1.TopologyCityCodeKey,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   cities,
+		}},
+	}
 }
