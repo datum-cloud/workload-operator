@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -64,24 +65,38 @@ type ClientDiscoverer struct {
 	// credential of its own; the numbers are read from the project either way,
 	// and only the unit labels fall back to a generic form without it.
 	PlatformClient client.Client
-
-	// Source selects which API group locations are read from. The zero value
-	// reads the group every deployment serves today, matching the manager's
-	// own default.
-	Source locations.Source
 }
 
 var _ Discoverer = (*ClientDiscoverer)(nil)
 
-// NewClientDiscoverer returns a Discoverer backed by c, reading locations from
-// source.
-func NewClientDiscoverer(c client.Client, source locations.Source) *ClientDiscoverer {
-	return &ClientDiscoverer{Client: c, Source: source}
+// NewClientDiscoverer returns a Discoverer backed by c.
+func NewClientDiscoverer(c client.Client) *ClientDiscoverer {
+	return &ClientDiscoverer{Client: c}
 }
 
+// ListPlacementLocations reads compute's own availability records. There is no
+// choice of source here: what an assistant needs is where compute is offered
+// and this project can use it, and only the availability records say that. The
+// manager still reads placement per its own configuration; this is the answer a
+// customer is given, and it is the same one wherever they ask.
 func (d *ClientDiscoverer) ListPlacementLocations(ctx context.Context) ([]locations.PlacementLocation, error) {
-	found, err := locations.ListPlacementLocations(ctx, d.Client, d.Source)
+	found, err := locations.ListPlacementLocations(ctx, d.Client, locations.SourceServiceAvailability)
 	if err != nil {
+		// A project that cannot answer the question at all must not be
+		// reported as a project with nowhere to run: the first is a deployment
+		// to fix, the second is a wait, and an assistant told the wrong one
+		// sends the customer to argue with the wrong people. The kind travels
+		// as evidence inside the wrapped error, the sentence does not lean on
+		// it, and the blame is placed where the fix is.
+		if errors.Is(err, locations.ErrAvailabilityNotServed) {
+			return nil, fmt.Errorf(
+				"compute could not read where it is offered from this project, because the service "+
+					"that publishes availability is not reachable here. This is a problem with how "+
+					"Datum is deployed for this project, not with the workload and not with the "+
+					"person who asked: nothing in a workload can be changed to fix it, and "+
+					"re-authenticating will not help. Underlying detail, for whoever operates "+
+					"Datum: %w", err)
+		}
 		return nil, fmt.Errorf("listing the locations this project may place at: %w", err)
 	}
 	return found, nil
@@ -184,11 +199,12 @@ func RegisterDiscoveryTools(s *mcp.Server, deps DepsFor) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:  ToolLocationsList,
 		Title: "List locations",
-		Description: "List the locations this project may place a Workload in, each with its city code " +
-			"(e.g. \"DFW\") and the attributes it declares. These are the only places this project may " +
-			"place a workload: a location missing from this list either does not offer compute at all " +
-			"or this project is not entitled to it, and a placement naming it will never come up. Call " +
-			"this before writing a Workload's placements rather than guessing a city. Read-only.",
+		Description: "List the locations where compute is offered and this project can use it, each with " +
+			"its city code (e.g. \"DFW\") and the attributes it declares. The list is derived from " +
+			"compute's own availability records, so it is where compute is actually running, not where " +
+			"it might be: a location missing from this list is one compute is not offered in, and a " +
+			"placement naming it will never come up. Call this before writing a Workload's placements " +
+			"rather than guessing a city. Read-only.",
 	}, locationsList(deps))
 
 	mcp.AddTool(s, &mcp.Tool{

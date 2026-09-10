@@ -8,11 +8,19 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"go.datum.net/compute/internal/locations"
 	"go.datum.net/compute/internal/quotaview"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
 
 // fakeDiscoverer serves canned entitlement facts so the discovery tools can be
@@ -354,4 +362,133 @@ func TestDiscoveryToolsAnswerOverTheWire(t *testing.T) {
 	if out.Locations[0].CityCode != cityAMS {
 		t.Errorf("locations[0].cityCode = %q, want the city the location declares", out.Locations[0].CityCode)
 	}
+}
+
+// TestClientDiscovererReadsComputeAvailability covers the one Discoverer that
+// talks to a control plane. The tools above run against a fake, so nothing else
+// proves that the locations an assistant is shown are the ones compute reports
+// itself available at — not every location the platform has, and not another
+// service's.
+func TestClientDiscovererReadsComputeAvailability(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := locationsv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("registering locations: %v", err)
+	}
+	if err := servicesv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("registering service availability: %v", err)
+	}
+
+	location := func(name, cityCode string) *locationsv1alpha1.Location {
+		return &locationsv1alpha1.Location{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: locationsv1alpha1.LocationSpec{
+				LocationClassRef: locationsv1alpha1.LocationClassReference{Name: "datum-managed"},
+				Topology:         map[string]string{locations.TopologyCityCodeKey: cityCode},
+			},
+		}
+	}
+	availability := func(name, service, at string, status metav1.ConditionStatus) *servicesv1alpha1.ServiceAvailability {
+		return &servicesv1alpha1.ServiceAvailability{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: servicesv1alpha1.ServiceAvailabilitySpec{
+				ServiceRef:  servicesv1alpha1.ServiceRef{Name: service},
+				LocationRef: servicesv1alpha1.LocationRef{Name: at},
+			},
+			Status: servicesv1alpha1.ServiceAvailabilityStatus{
+				Conditions: []metav1.Condition{{
+					Type:               "Available",
+					Status:             status,
+					Reason:             "Reported",
+					LastTransitionTime: metav1.Now(),
+				}},
+			},
+		}
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			location("us-south-dfw", cityDFW),
+			location("eu-west-ams", cityAMS),
+			location("us-east-iad", "IAD"),
+			availability("compute-dfw", "compute", "us-south-dfw", metav1.ConditionTrue),
+			// Compute is not up here yet, so it is not somewhere to place.
+			availability("compute-ams", "compute", "eu-west-ams", metav1.ConditionFalse),
+			// Another service is available at IAD. Compute is not, and the
+			// project's control plane carries every service's records.
+			availability("dns-iad", "dns", "us-east-iad", metav1.ConditionTrue),
+		).
+		Build()
+
+	found, err := NewClientDiscoverer(cl).ListPlacementLocations(context.Background())
+	if err != nil {
+		t.Fatalf("ListPlacementLocations: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("got %d locations %+v, want only the one compute is available at", len(found), found)
+	}
+	if found[0].Name != "us-south-dfw" {
+		t.Errorf("location = %q, want us-south-dfw", found[0].Name)
+	}
+	if code, ok := found[0].CityCode(); !ok || code != cityDFW {
+		t.Errorf("cityCode = %q (declared %v), want %q from the location itself", code, ok, cityDFW)
+	}
+}
+
+// TestLocationsListBlamesTheDeploymentWhenAvailabilityIsNotServed is the case
+// the empty list must never be given for. A project that cannot be asked where
+// compute is offered has to say so: told "no locations", a customer waits for
+// Datum to add one, and nobody ever looks at the deployment that is actually
+// broken.
+func TestLocationsListBlamesTheDeploymentWhenAvailabilityIsNotServed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := locationsv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("registering locations: %v", err)
+	}
+	if err := servicesv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("registering service availability: %v", err)
+	}
+
+	// Nothing here serves the availability records, the way a project the
+	// service was never installed for behaves.
+	notServed := interceptor.Funcs{
+		List: func(
+			ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption,
+		) error {
+			if _, ok := list.(*servicesv1alpha1.ServiceAvailabilityList); ok {
+				return &apimeta.NoKindMatchError{GroupKind: schema.GroupKind{Kind: "ServiceAvailability"}}
+			}
+			return c.List(ctx, list, opts...)
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(notServed).Build()
+	disc := NewClientDiscoverer(cl)
+
+	found, err := disc.ListPlacementLocations(context.Background())
+	if err == nil {
+		t.Fatalf("ListPlacementLocations returned %+v and no error; a kind nobody serves must not "+
+			"read as a project with nowhere to run", found)
+	}
+	if !errors.Is(err, locations.ErrAvailabilityNotServed) {
+		t.Errorf("error = %v, want it to stay identifiable as the availability read failing", err)
+	}
+
+	// The tool has to relay it, not swallow it into an empty list.
+	_, out, err := locationsList(discoveryDeps(disc))(context.Background(), nil, LocationsListInput{})
+	if err == nil {
+		t.Fatalf("%s returned %+v and no error", ToolLocationsList, out)
+	}
+
+	// What the customer is told: the deployment is at fault, they are not, and
+	// nothing in the wording is Datum's internal vocabulary.
+	msg := err.Error()
+	for _, want := range []string{"deployed", "not with the person who asked", "re-authenticating will not help"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not say %q; the customer must not be sent to fix their workload", msg, want)
+		}
+	}
+	terms := append(internalVocabulary(), customerFacingOnly()...)
+	// "ServiceAvailability" travels as an identifier, as a reason code does.
+	checkCopy(t, ToolLocationsList+" not-served error", msg, terms, "ServiceAvailability")
 }

@@ -34,7 +34,7 @@ different answer:
 | Check | Tool | If it fails |
 |---|---|---|
 | Compute is enabled for the project | `compute_locations_list` | Nothing can be placed. Datum's to enable — the user runs `datumctl compute access request`, and approval is a manual step on Datum's side. |
-| Somewhere to run it | `compute_locations_list` | The city codes it returns are the only ones a placement may name. An empty list means nothing is available to this project yet; that is Datum's, not something the user can add. |
+| Somewhere to run it | `compute_locations_list` | The city codes it returns are the only ones a placement may name; they come from compute's own availability records, so a city missing from the list is one compute is not offered in. An empty list means nothing is available to this project yet; that is Datum's, not something the user can add. |
 | A network | `compute_networks_list` | `default` by convention. If it is missing, `compute_workload_plan` says so and `compute_workload_apply` creates it alongside the workload — say so when you show the plan, because it is a second object being created. |
 | Quota | `compute_quota_get` | Quota is granted by Datum and cannot be self-served. A project with none can still create a workload; its instances then sit at `QuotaGranted=False` with `QuotaNoBudget` and never start. |
 

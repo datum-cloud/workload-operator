@@ -27,7 +27,7 @@ over Streamable HTTP:
 | Tools | Names |
 |---|---|
 | Diagnosis, read-only | `compute_workloads_list`, `compute_workloads_get`, `compute_instances_list`, `compute_workload_diagnose`, `compute_reason_explain` |
-| Discovery, read-only | `compute_locations_list`, `compute_networks_list`, `compute_quota_get`, `compute_instance_types_list` — what a project may place, attach to, afford, and ask for |
+| Discovery, read-only | `compute_locations_list`, `compute_networks_list`, `compute_quota_get`, `compute_instance_types_list` — what a project may place, attach to, afford, and ask for. The locations come from compute's own availability records, so the list is where compute is offered and this project can use it. |
 | Planning, writes nothing | `compute_workload_render` (inputs to a manifest, pure), `compute_workload_validate` (the server's verdict on that manifest without creating it) |
 | Mutating | `compute_workload_plan`, `compute_workload_apply` |
 

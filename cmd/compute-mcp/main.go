@@ -55,10 +55,10 @@ import (
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	"go.datum.net/compute/internal/agent"
-	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 	quotav1alpha1 "go.miloapis.com/milo/pkg/apis/quota/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
 
 const (
@@ -102,13 +102,6 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 
-	// locationSource selects which API group the discovery tools read a
-	// project's locations from. Deployment configuration, resolved once at
-	// startup and read by every request, mirroring how the manager takes it
-	// from its own config. The zero value reads the group every deployment
-	// serves today.
-	locationSource locations.Source
-
 	// planTokenKey signs the plan tokens compute_workload_plan mints and
 	// compute_workload_apply checks. Deployment configuration, resolved once at
 	// startup: every request reads it, and a key that differs between replicas
@@ -117,41 +110,30 @@ var (
 )
 
 // The scheme carries every group a tool reads: compute's own objects for the
-// diagnosis walk, plus networks, locations and quota for discovery. A group
-// missing here fails at the first read with a scheme error, which says nothing
-// about which tool wanted it.
+// diagnosis walk, plus networks, quota, and — for the locations a project may
+// place at — compute's service availability records and the Locations they
+// name. A group missing here fails at the first read with a scheme error, which
+// says nothing about which tool wanted it.
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(computev1alpha.AddToScheme(scheme))
 	utilruntime.Must(networkingv1alpha.AddToScheme(scheme))
 	utilruntime.Must(locationsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(quotav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(servicesv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
-	var addr, locationSourceFlag string
+	var addr string
 
 	flag.StringVar(&addr, "addr", envOr("COMPUTE_MCP_ADDR", ":8080"),
 		"address to serve MCP on")
-	flag.StringVar(&locationSourceFlag, "location-source", envOr("LOCATION_SOURCE", ""),
-		fmt.Sprintf("API group to read a project's locations from: %q or %q (default %q)",
-			locations.SourceNetworkServices, locations.SourceLocations, locations.SourceNetworkServices))
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-
-	// Resolved at startup rather than per request: a misspelled source is a
-	// deployment mistake, and it should stop the process rather than turn
-	// every compute_locations_list call into an error a customer sees.
-	resolvedSource, err := locations.Source(locationSourceFlag).Resolve()
-	if err != nil {
-		setupLog.Error(err, "refusing to start")
-		os.Exit(1)
-	}
-	locationSource = resolvedSource
 
 	key, err := resolvePlanTokenKey(os.Getenv(planTokenKeyEnv))
 	if err != nil {
@@ -339,7 +321,7 @@ func depsFromRequest(r *http.Request, baseConfig *rest.Config) agent.DepsFor {
 		// being fetched with an identity the caller does not have.
 		return agent.ToolDeps{
 			Reader:     agent.NewClientReader(c),
-			Discoverer: agent.NewClientDiscoverer(c, locationSource),
+			Discoverer: agent.NewClientDiscoverer(c),
 			Writer:     agent.NewClientWriter(c),
 			Namespace:  resourceNamespace,
 			// The project a plan is bound to is the header's, the same one the

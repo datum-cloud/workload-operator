@@ -46,9 +46,11 @@ type WorkloadOperator struct {
 
 	// LocationSource names the API group locations are read from. Use
 	// "NetworkServices" for networking.datumapis.com LocationBindings and
-	// ServingLocations, or "Locations" for the dedicated locations.miloapis.com
-	// service. It governs reads only; nothing about what compute writes changes
-	// with it. Defaults to "NetworkServices".
+	// ServingLocations, "Locations" for the dedicated locations.miloapis.com
+	// service, or "ServiceAvailability" to take the placeable locations from
+	// compute's own services.miloapis.com availability records and their
+	// Locations. It governs reads only; nothing about what compute writes
+	// changes with it. Defaults to "NetworkServices".
 	LocationSource locations.Source `json:"locationSource,omitempty"`
 }
 

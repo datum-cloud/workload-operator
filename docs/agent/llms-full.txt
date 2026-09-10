@@ -230,7 +230,9 @@ there, and this section deliberately does not restate them.
   compute_reason_explain      any reason, explained, classified, and — when
                               transient — the window it should clear inside
   compute_locations_list      the city codes this project may place a workload
-                              in
+                              in, taken from compute's availability records —
+                              a city absent from it is one compute is not
+                              offered in
   compute_networks_list       the networks an interface may attach to
   compute_quota_get           how much compute the project is allowed, and
                               what is left
