@@ -310,8 +310,8 @@ func diagnosisFixtures() map[string]Diagnosis {
 		[]computev1alpha.WorkloadDeployment{
 			deployment("edge-cache-ams",
 				condAt(computev1alpha.WorkloadDeploymentAvailable, "False",
-					computev1alpha.WorkloadDeploymentReasonCityCodeMismatch,
-					"Asked for AMS; serving LHR.", fresh)),
+					computev1alpha.WorkloadDeploymentReasonLocationMismatch,
+					"Asked for loc-ams-1; serving loc-lhr-1.", fresh)),
 		}, nil)
 
 	out["transient"] = DiagnoseAt(stagingNow,

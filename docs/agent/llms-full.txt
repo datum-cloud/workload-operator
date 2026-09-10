@@ -47,8 +47,8 @@ Workload
 
 WorkloadDeployment
   One Workload as it exists in one location. Created by compute, not by the
-  customer. This is where the location, the city, and the lookup of the
-  ConfigMaps and Secrets the workload references are settled.
+  customer. This is where the location and the lookup of the ConfigMaps and
+  Secrets the workload references are settled.
 
 Instance
   A single running unit within a deployment. Carries the most specific
@@ -90,12 +90,12 @@ user-actionable
   Something in the workload the customer wrote, or in their project's setup.
   They can fix it. Examples: ImageUnavailable, InstanceCrashing,
   ConfigurationError, QuotaExceeded, SourceNotFound, SourceTooLarge,
-  NetworkNotFound.
+  NetworkNotFound, NoMatchingLocations.
 
 platform fault
   Datum's to fix. No change to the workload will help, and suggesting one wastes
   the customer's time. Examples: NoMatchingLocation, AmbiguousServingLocation,
-  CityCodeMismatch, QuotaNoBudget, QuotaBackendUnavailable, QuotaMisconfigured,
+  LocationMismatch, QuotaNoBudget, QuotaBackendUnavailable, QuotaMisconfigured,
   QuotaProjectNotFound, SourceUnauthorized, Suspended.
 
 transient

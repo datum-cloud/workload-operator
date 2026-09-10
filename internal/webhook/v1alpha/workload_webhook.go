@@ -47,12 +47,31 @@ type workloadWebhook struct {
 	locationSource locations.Source
 }
 
-func (r *workloadWebhook) validCityCodes(ctx context.Context, c client.Client) ([]string, error) {
+// readyLocations describes the locations a placement may run at: the
+// locations projected into the project control plane that are Ready and where
+// compute is available, as the names a placement may list and the topology a
+// selector is matched against.
+type readyLocations struct {
+	names      []string
+	topologies map[string]map[string]string
+}
+
+func (r *workloadWebhook) readyLocations(ctx context.Context, c client.Client) (readyLocations, error) {
 	placementLocations, err := locations.ListPlacementLocations(ctx, c, r.locationSource)
 	if err != nil {
-		return nil, err
+		return readyLocations{}, err
 	}
-	return sets.List(locations.CityCodes(placementLocations)), nil
+
+	ready := readyLocations{
+		names:      sets.List(locations.PlaceableNames(placementLocations)),
+		topologies: make(map[string]map[string]string),
+	}
+	for _, location := range placementLocations {
+		if location.Placeable() {
+			ready.topologies[location.Name] = location.Topology
+		}
+	}
+	return ready, nil
 }
 
 var _ admission.Defaulter[*computev1alpha.Workload] = &workloadWebhook{}
@@ -60,6 +79,12 @@ var _ admission.Validator[*computev1alpha.Workload] = &workloadWebhook{}
 
 // Default implements admission.Defaulter so a mutating webhook will be registered for the type.
 func (r *workloadWebhook) Default(ctx context.Context, workload *computev1alpha.Workload) error {
+	// A manifest written before placement moved to locations still names
+	// city codes. It is rewritten here so what is stored is what the
+	// controller places by, and so the stored object never carries the
+	// deprecated field.
+	workload.MigrateCityCodes()
+
 	// With the gate off there is only one runtime class, so the field stays
 	// empty rather than recording a class name the platform does not yet honor.
 	if features.FeatureGate.Enabled(features.RuntimeClasses) {
@@ -114,7 +139,7 @@ func (r *workloadWebhook) ValidateCreate(ctx context.Context, workload *computev
 	// that means for the scheduling phase, since there would not currently be
 	// sufficient context to know who created the workload and what locations
 	// are valid candidates based on that. Maybe an annotation, or spec field?
-	validCityCodes, err := r.validCityCodes(ctx, clusterClient)
+	ready, err := r.readyLocations(ctx, clusterClient)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +150,13 @@ func (r *workloadWebhook) ValidateCreate(ctx context.Context, workload *computev
 	}
 
 	opts := validation.WorkloadValidationOptions{
-		Context:          ctx,
-		Client:           clusterClient,
-		AdmissionRequest: req,
-		Workload:         workload,
-		ValidCityCodes:   validCityCodes,
-		RuntimeClasses:   runtimeClasses,
+		Context:            ctx,
+		Client:             clusterClient,
+		AdmissionRequest:   req,
+		Workload:           workload,
+		ValidLocations:     ready.names,
+		LocationTopologies: ready.topologies,
+		RuntimeClasses:     runtimeClasses,
 	}
 
 	if errs := validation.ValidateWorkloadCreate(workload, opts); len(errs) > 0 {
@@ -156,7 +182,7 @@ func (r *workloadWebhook) ValidateUpdate(ctx context.Context, oldWorkload *compu
 		return nil, err
 	}
 
-	validCityCodes, err := r.validCityCodes(ctx, clusterClient)
+	ready, err := r.readyLocations(ctx, clusterClient)
 	if err != nil {
 		return nil, err
 	}
@@ -167,12 +193,13 @@ func (r *workloadWebhook) ValidateUpdate(ctx context.Context, oldWorkload *compu
 	}
 
 	opts := validation.WorkloadValidationOptions{
-		Context:          ctx,
-		Client:           clusterClient,
-		AdmissionRequest: req,
-		Workload:         newWorkload,
-		ValidCityCodes:   validCityCodes,
-		RuntimeClasses:   runtimeClasses,
+		Context:            ctx,
+		Client:             clusterClient,
+		AdmissionRequest:   req,
+		Workload:           newWorkload,
+		ValidLocations:     ready.names,
+		LocationTopologies: ready.topologies,
+		RuntimeClasses:     runtimeClasses,
 	}
 
 	if errs := validation.ValidateWorkloadUpdate(newWorkload, oldWorkload, opts); len(errs) > 0 {

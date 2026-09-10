@@ -64,6 +64,28 @@ func TestWorkloadWebhookDefaultGateOff(t *testing.T) {
 	}
 }
 
+// TestWorkloadWebhookDefaultMigratesCityCodes covers the shim for manifests
+// and stored objects written before placement moved to locations: a placement
+// that only names city codes is stored as the equivalent selector.
+func TestWorkloadWebhookDefaultMigratesCityCodes(t *testing.T) {
+	featuregatetesting.SetFeatureGateDuringTest(t, features.MutableFeatureGate, features.RuntimeClasses, false)
+
+	workload := &computev1alpha.Workload{}
+	workload.Spec.Placements = []computev1alpha.WorkloadPlacement{{Name: "default", CityCodes: []string{"DFW"}}}
+
+	if err := (&workloadWebhook{}).Default(context.Background(), workload); err != nil {
+		t.Fatalf("Default: %v", err)
+	}
+
+	placement := workload.Spec.Placements[0]
+	if placement.CityCodes != nil {
+		t.Errorf("cityCodes = %v, want cleared", placement.CityCodes)
+	}
+	if placement.LocationSelector == nil || placement.LocationSelector.MatchLabels["topology.datum.net/city-code"] != "DFW" {
+		t.Errorf("locationSelector = %v, want a city-code selector for DFW", placement.LocationSelector)
+	}
+}
+
 // TestDefaultRuntimeClass covers which class a workload that selected none
 // records. The catalog's default marker decides it, and a catalog with no
 // default leaves the field empty for validation to reject.

@@ -89,6 +89,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(config.AddToScheme(scheme))
+	utilruntime.Must(locationsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(config.RegisterDefaults(scheme))
 	utilruntime.Must(computev1alpha.AddToScheme(scheme))
 	utilruntime.Must(networkingv1alpha.AddToScheme(scheme))

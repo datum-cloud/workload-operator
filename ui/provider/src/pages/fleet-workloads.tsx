@@ -125,9 +125,9 @@ function WorkloadsTable({ workloads }: { workloads: FleetWorkload[] }) {
           </span>
         ),
       }),
-      columnHelper.accessor((row) => row.workload.regions.join(', '), {
-        id: 'regions',
-        header: 'Regions',
+      columnHelper.accessor((row) => row.workload.locations.join(', '), {
+        id: 'locations',
+        header: 'Locations',
         cell: ({ getValue }) => <span className="text-muted-foreground">{getValue() || '—'}</span>,
       }),
       columnHelper.accessor((row) => row.statusSince.getTime(), {

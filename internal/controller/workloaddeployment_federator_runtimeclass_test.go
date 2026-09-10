@@ -18,11 +18,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
-// testCityPolicyLAX is the PropagationPolicy name for the test city when no
-// runtime class is selected.
-const testCityPolicyLAX = "city-lax"
+// testLocationPolicy is the PropagationPolicy name for the test location when
+// no runtime class is selected.
+const testLocationPolicy = "location-us-west-2"
 
 // These runtime class names are invented rather than the ones the platform
 // ships. Propagation must key off whatever class the deployment carries, and
@@ -38,11 +39,11 @@ func withRuntimeClass(class string) func(*computev1alpha.WorkloadDeployment) {
 	}
 }
 
-// testCell returns a Karmada Cluster serving the given runtime classes in the
-// given city. A cell is a point-of-presence cluster registered with the
+// testCell returns a Karmada Cluster serving the given runtime classes at the
+// given location. A cell is a point-of-presence cluster registered with the
 // federation hub.
-func testCell(name, cityCode string, classes ...string) *karmadaclusterv1alpha1.Cluster {
-	cellLabels := map[string]string{cityCodeLabel: cityCode}
+func testCell(name, location string, classes ...string) *karmadaclusterv1alpha1.Cluster {
+	cellLabels := map[string]string{locationLabel: location}
 	for _, class := range classes {
 		cellLabels[computev1alpha.RuntimeClassServedLabel(class)] = computev1alpha.RuntimeClassServedLabelValue
 	}
@@ -53,9 +54,9 @@ func testCell(name, cityCode string, classes ...string) *karmadaclusterv1alpha1.
 
 // hubSiblingDeployment returns a hub-namespace WorkloadDeployment other than
 // the one under test. It carries the labels the federator stamps for the given
-// city and runtime class.
-func hubSiblingDeployment(cityCode, runtimeClass string) *computev1alpha.WorkloadDeployment {
-	wdLabels := map[string]string{cityCodeLabel: cityCode}
+// location and runtime class.
+func hubSiblingDeployment(location, runtimeClass string) *computev1alpha.WorkloadDeployment {
+	wdLabels := map[string]string{locationLabel: location}
 	if runtimeClass != "" {
 		wdLabels[computev1alpha.RuntimeClassLabel] = runtimeClass
 	}
@@ -66,7 +67,7 @@ func hubSiblingDeployment(cityCode, runtimeClass string) *computev1alpha.Workloa
 			Labels:    wdLabels,
 		},
 		Spec: computev1alpha.WorkloadDeploymentSpec{
-			CityCode:      cityCode,
+			LocationRef:   locationsv1alpha1.LocationReference{Name: location},
 			PlacementName: testDefaultPlacement,
 			WorkloadRef:   computev1alpha.WorkloadReference{Name: rdTestWorkloadName},
 			ScaleSettings: computev1alpha.HorizontalScaleSettings{MinReplicas: 1},
@@ -93,34 +94,34 @@ func TestWorkloadDeploymentFederator_ClassAwarePropagation(t *testing.T) {
 			name:              "gate off, class selected — propagates class-blind",
 			classesEnabled:    false,
 			specClass:         testClassBasalt,
-			wantPolicyName:    testCityPolicyLAX,
+			wantPolicyName:    testLocationPolicy,
 			wantWDLabel:       "",
-			wantClusterLabels: map[string]string{cityCodeLabel: testCityCodeLAX},
+			wantClusterLabels: map[string]string{locationLabel: testFederatorLocation},
 		},
 		{
 			name:              "gate off, no class — propagates class-blind",
 			classesEnabled:    false,
 			specClass:         "",
-			wantPolicyName:    testCityPolicyLAX,
+			wantPolicyName:    testLocationPolicy,
 			wantWDLabel:       "",
-			wantClusterLabels: map[string]string{cityCodeLabel: testCityCodeLAX},
+			wantClusterLabels: map[string]string{locationLabel: testFederatorLocation},
 		},
 		{
 			name:              "gate on, no class — propagates class-blind",
 			classesEnabled:    true,
 			specClass:         "",
-			wantPolicyName:    testCityPolicyLAX,
+			wantPolicyName:    testLocationPolicy,
 			wantWDLabel:       "",
-			wantClusterLabels: map[string]string{cityCodeLabel: testCityCodeLAX},
+			wantClusterLabels: map[string]string{locationLabel: testFederatorLocation},
 		},
 		{
 			name:           "gate on, class selected — propagates to cells serving it",
 			classesEnabled: true,
 			specClass:      testClassBasalt,
-			wantPolicyName: "city-lax-class-basalt",
+			wantPolicyName: "location-us-west-2-class-basalt",
 			wantWDLabel:    testClassBasalt,
 			wantClusterLabels: map[string]string{
-				cityCodeLabel: testCityCodeLAX,
+				locationLabel: testFederatorLocation,
 				computev1alpha.RuntimeClassServedLabel(testClassBasalt): computev1alpha.RuntimeClassServedLabelValue,
 			},
 		},
@@ -133,7 +134,7 @@ func TestWorkloadDeploymentFederator_ClassAwarePropagation(t *testing.T) {
 			wd := testWorkloadDeployment(withFinalizer, withRuntimeClass(tt.specClass))
 			projectClient := newProjectFakeClient(testProjectNamespace(), wd)
 			karmadaClient := newKarmadaFakeClient(
-				testCell("lax-cell", testCityCodeLAX, testClassBasalt),
+				testCell("lax-cell", testFederatorLocation, testClassBasalt),
 			)
 			r := newTestFederator(projectClient, karmadaClient)
 			r.RuntimeClassesEnabled = tt.classesEnabled
@@ -147,7 +148,7 @@ func TestWorkloadDeploymentFederator_ClassAwarePropagation(t *testing.T) {
 				Name:      testWDName,
 				Namespace: testKarmadaNSStr,
 			}, &karmadaWD))
-			assert.Equal(t, testCityCodeLAX, karmadaWD.Labels[cityCodeLabel])
+			assert.Equal(t, testFederatorLocation, karmadaWD.Labels[locationLabel])
 			assert.Equal(t, tt.wantWDLabel, karmadaWD.Labels[computev1alpha.RuntimeClassLabel])
 
 			var pp karmadapolicyv1alpha1.PropagationPolicy
@@ -161,7 +162,7 @@ func TestWorkloadDeploymentFederator_ClassAwarePropagation(t *testing.T) {
 			require.Len(t, pp.Spec.ResourceSelectors, 3)
 			wdSel := pp.Spec.ResourceSelectors[0]
 			require.NotNil(t, wdSel.LabelSelector)
-			assert.Equal(t, testCityCodeLAX, wdSel.LabelSelector.MatchLabels[cityCodeLabel])
+			assert.Equal(t, testFederatorLocation, wdSel.LabelSelector.MatchLabels[locationLabel])
 			assert.Equal(t, tt.wantWDLabel, wdSel.LabelSelector.MatchLabels[computev1alpha.RuntimeClassLabel])
 
 			require.NotNil(t, pp.Spec.Placement.ClusterAffinity)
@@ -171,17 +172,17 @@ func TestWorkloadDeploymentFederator_ClassAwarePropagation(t *testing.T) {
 	}
 }
 
-// TestCleanupPropagationPolicyIfUnused_PerCityAndClass verifies the policy is
+// TestCleanupPropagationPolicyIfUnused_PerLocationAndClass verifies the policy is
 // removed only when no deployment it propagates remains. A deployment in
 // another runtime class must not keep a class policy alive, and a class-labeled
 // deployment must not keep the no-class policy alive.
-func TestCleanupPropagationPolicyIfUnused_PerCityAndClass(t *testing.T) {
+func TestCleanupPropagationPolicyIfUnused_PerLocationAndClass(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name           string
 		classesEnabled bool
-		cityCode       string
+		location       string
 		runtimeClass   string
 		remaining      []client.Object
 		wantPPGone     bool
@@ -189,54 +190,54 @@ func TestCleanupPropagationPolicyIfUnused_PerCityAndClass(t *testing.T) {
 		{
 			name:           "gate off, no siblings — removed",
 			classesEnabled: false,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			wantPPGone:     true,
 		},
 		{
-			name:           "gate off, city sibling — kept",
+			name:           "gate off, location sibling — kept",
 			classesEnabled: false,
-			cityCode:       testCityCodeLAX,
-			remaining:      []client.Object{hubSiblingDeployment(testCityCodeLAX, "")},
+			location:       testFederatorLocation,
+			remaining:      []client.Object{hubSiblingDeployment(testFederatorLocation, "")},
 			wantPPGone:     false,
 		},
 		{
-			name:           "same city and class — kept",
+			name:           "same location and class — kept",
 			classesEnabled: true,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			runtimeClass:   testClassAzurite,
-			remaining:      []client.Object{hubSiblingDeployment(testCityCodeLAX, testClassAzurite)},
+			remaining:      []client.Object{hubSiblingDeployment(testFederatorLocation, testClassAzurite)},
 			wantPPGone:     false,
 		},
 		{
-			name:           "same city, other class — removed",
+			name:           "same location, other class — removed",
 			classesEnabled: true,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			runtimeClass:   testClassAzurite,
-			remaining:      []client.Object{hubSiblingDeployment(testCityCodeLAX, testClassBasalt)},
+			remaining:      []client.Object{hubSiblingDeployment(testFederatorLocation, testClassBasalt)},
 			wantPPGone:     true,
 		},
 		{
-			name:           "other city, same class — removed",
+			name:           "other location, same class — removed",
 			classesEnabled: true,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			runtimeClass:   testClassAzurite,
-			remaining:      []client.Object{hubSiblingDeployment("SEA", testClassAzurite)},
+			remaining:      []client.Object{hubSiblingDeployment(testWestLocationName, testClassAzurite)},
 			wantPPGone:     true,
 		},
 		{
 			name:           "class-blind policy, class-labeled sibling — removed",
 			classesEnabled: true,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			runtimeClass:   "",
-			remaining:      []client.Object{hubSiblingDeployment(testCityCodeLAX, testClassAzurite)},
+			remaining:      []client.Object{hubSiblingDeployment(testFederatorLocation, testClassAzurite)},
 			wantPPGone:     true,
 		},
 		{
 			name:           "class-blind policy, unclassed sibling — kept",
 			classesEnabled: true,
-			cityCode:       testCityCodeLAX,
+			location:       testFederatorLocation,
 			runtimeClass:   "",
-			remaining:      []client.Object{hubSiblingDeployment(testCityCodeLAX, "")},
+			remaining:      []client.Object{hubSiblingDeployment(testFederatorLocation, "")},
 			wantPPGone:     false,
 		},
 	}
@@ -245,7 +246,7 @@ func TestCleanupPropagationPolicyIfUnused_PerCityAndClass(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			ppName := propagationPolicyNameFor(tt.cityCode, tt.runtimeClass)
+			ppName := propagationPolicyNameFor(tt.location, tt.runtimeClass)
 			objs := []client.Object{
 				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testKarmadaNSStr}},
 				&karmadapolicyv1alpha1.PropagationPolicy{
@@ -259,7 +260,7 @@ func TestCleanupPropagationPolicyIfUnused_PerCityAndClass(t *testing.T) {
 			r.RuntimeClassesEnabled = tt.classesEnabled
 
 			ctx := context.Background()
-			require.NoError(t, r.cleanupPropagationPolicyIfUnused(ctx, testKarmadaNSStr, tt.cityCode, tt.runtimeClass))
+			require.NoError(t, r.cleanupPropagationPolicyIfUnused(ctx, testKarmadaNSStr, tt.location, tt.runtimeClass))
 
 			var pp karmadapolicyv1alpha1.PropagationPolicy
 			err := karmadaClient.Get(ctx, types.NamespacedName{Name: ppName, Namespace: testKarmadaNSStr}, &pp)
@@ -286,24 +287,24 @@ func TestWorkloadDeploymentFederator_UnservedRuntimeClassCondition(t *testing.T)
 		wantReason     string
 	}{
 		{
-			name:           "no cell in the city serves the class",
+			name:           "no cell at the location serves the class",
 			classesEnabled: true,
 			specClass:      testClassBasalt,
-			cells:          []client.Object{testCell("lax-cell", testCityCodeLAX, testClassAzurite)},
+			cells:          []client.Object{testCell("lax-cell", testFederatorLocation, testClassAzurite)},
 			wantReason:     computev1alpha.WorkloadDeploymentReasonRuntimeClassNotServed,
 		},
 		{
 			name:           "the class is served elsewhere, not here",
 			classesEnabled: true,
 			specClass:      testClassBasalt,
-			cells:          []client.Object{testCell("sea-cell", "SEA", testClassBasalt)},
+			cells:          []client.Object{testCell("sea-cell", testWestLocationName, testClassBasalt)},
 			wantReason:     computev1alpha.WorkloadDeploymentReasonRuntimeClassNotServed,
 		},
 		{
 			name:           "a cell serves the class",
 			classesEnabled: true,
 			specClass:      testClassBasalt,
-			cells:          []client.Object{testCell("lax-cell", testCityCodeLAX, testClassBasalt)},
+			cells:          []client.Object{testCell("lax-cell", testFederatorLocation, testClassBasalt)},
 			wantReason:     "",
 		},
 		{
@@ -344,7 +345,7 @@ func TestWorkloadDeploymentFederator_UnservedRuntimeClassCondition(t *testing.T)
 			require.NotNil(t, cond, "an unplaceable deployment must carry an Available condition")
 			assert.Equal(t, metav1.ConditionFalse, cond.Status)
 			assert.Equal(t, tt.wantReason, cond.Reason)
-			assert.Contains(t, cond.Message, testCityCodeLAX)
+			assert.Contains(t, cond.Message, testFederatorLocation)
 			assert.Contains(t, cond.Message, tt.specClass)
 			assert.NotContains(t, cond.Message, "Pod")
 		})

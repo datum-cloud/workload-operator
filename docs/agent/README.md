@@ -88,7 +88,7 @@ orientation and classification; the procedures live here and nowhere else.
 | `quota-triage` | `QuotaExceeded` vs `QuotaNoBudget` vs backend faults |
 | `instance-not-ready` | `ImageUnavailable`, `InstanceCrashing`, `ConfigurationError` |
 | `referenced-data-triage` | Missing, unauthorized, or oversized ConfigMaps/Secrets |
-| `placement-triage` | `NoMatchingLocation`, `AmbiguousServingLocation`, `CityCodeMismatch` |
+| `placement-triage` | `NoMatchingLocation`, `AmbiguousServingLocation`, `LocationMismatch` |
 | `stalled-transient` | A transient reason that has outlived its expected window |
 
 A skill never grants privileges. It can only direct the model toward tools that

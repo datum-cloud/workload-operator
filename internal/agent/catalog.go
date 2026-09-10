@@ -439,10 +439,10 @@ var catalog = []ReasonInfo{
 		Skill:       SkillPlacementTriage,
 	},
 	{
-		Reason:         computev1alpha.WorkloadDeploymentReasonCityCodeMismatch,
+		Reason:         computev1alpha.WorkloadDeploymentReasonLocationMismatch,
 		ConditionTypes: []string{computev1alpha.WorkloadDeploymentAvailable},
 		Actionability:  ActionabilityPlatform,
-		Explanation:    "Your workload asked to run in one city and was sent to another, so Datum is refusing to start it in the wrong place.",
+		Explanation:    "Your workload asked to run at one location and was sent to another, so Datum is refusing to start it in the wrong place.",
 		Remediation:    "Raise this with Datum — your placement request is fine; it was routed to the wrong place on their side.",
 		Skill:          SkillPlacementTriage,
 	},
@@ -513,6 +513,18 @@ var catalog = []ReasonInfo{
 		Explanation:    "Nothing in this placement is serving yet.",
 		Remediation:    "Look at what this placement created; the cause is there.",
 		Skill:          SkillWorkloadNotAvailable,
+	},
+	{
+		Reason:         computev1alpha.WorkloadReasonNoMatchingLocations,
+		ConditionTypes: []string{computev1alpha.WorkloadAvailable},
+		Actionability:  ActionabilityUser,
+		Explanation: "This placement resolves to no location, so nothing was created for it. Either none " +
+			"of the locations it names is ready with compute available, or its location selector " +
+			"matches none of the project's locations that are.",
+		Remediation: "Compare the placement against the project's locations, their topology " +
+			"(city code, region), and where compute is available. Name a location that exists and " +
+			"offers compute, or widen the selector until it matches one.",
+		Skill: SkillWorkloadNotAvailable,
 	},
 
 	// Runtime classes. A workload selects a class to say how it should be

@@ -49,24 +49,24 @@ The fastest path requires no YAML:
 $ datumctl compute deploy api \
     --image=ghcr.io/acme/api:1.4.2 \
     --instance-type=d1-standard-2 \
-    --city=DFW,IAD \
+    --location=us-east-1,eu-west-1 \
     --min=2 \
     --port=8080
 
 Resolving workload "api" in project acme-prod...
   Workload does not exist — creating.
-  Placement "default": cities=[DFW, IAD], min=2
+  Placement "default": locations=[us-east-1, eu-west-1], min=2
 
 Applying...
   workload/api created
 
 Waiting for rollout. Ctrl-C to detach (rollout continues in background).
 
-  PLACEMENT  CITY  DESIRED  READY  PHASE
-  default    DFW        2      0   Starting
-  default    IAD        2      0   Starting
-  default    DFW        2      2   Running
-  default    IAD        2      2   Running
+  PLACEMENT  LOCATION    DESIRED  READY  PHASE
+  default    us-east-1         2      0   Starting
+  default    eu-west-1         2      0   Starting
+  default    us-east-1         2      2   Running
+  default    eu-west-1         2      2   Running
 
 Rollout complete in 47s.
 
@@ -79,6 +79,21 @@ Rollout complete in 47s.
 Saved workload config to ./workload.yaml — commit this file to manage deployments declaratively.
 ```
 
+Naming locations is the default. When a developer would rather describe where to run than list it, `--location-selector` selects every ready location whose topology matches, and the placement follows locations as they are added or removed:
+
+```
+$ datumctl compute deploy api \
+    --image=ghcr.io/acme/api:1.4.2 \
+    --location-selector='topology.datum.net/city-code=DFW' \
+    --min=2
+
+Resolving workload "api" in project acme-prod...
+  Workload does not exist — creating.
+  Placement "default": selector=[topology.datum.net/city-code=DFW], min=2
+```
+
+The saved config records the selector, and `datumctl compute workloads describe api` shows which locations it currently resolves to.
+
 If a developer prefers an interactive walk-through:
 
 ```
@@ -86,14 +101,14 @@ $ datumctl compute deploy
 ? Workload name:                  api
 ? Container image:                ghcr.io/acme/api:1.4.2
 ? Instance type [d1-standard-2]:
-? Cities (comma-separated) [DFW]: DFW,IAD
-? Min replicas per city [1]:      2
+? Locations [us-east-1]:          us-east-1,eu-west-1
+? Min replicas per location [1]:  2
 ? Expose port (optional):         8080
 
   workload:      api
   image:         ghcr.io/acme/api:1.4.2
   instance type: d1-standard-2
-  cities:        DFW, IAD
+  locations:     us-east-1, eu-west-1
   replicas:      min=2
   ports:         8080/tcp
 
@@ -130,9 +145,9 @@ Updated      47s ago                         Revision #7
 
 Health       Available — all placements at desired replicas
 
-             CITY  READY  DESIRED  TYPE
-  default    DFW   2/2    2        d1-standard-2
-             IAD   2/2    2        d1-standard-2
+             LOCATION   READY  DESIRED  TYPE
+  default    us-east-1  2/2    2        d1-standard-2
+             eu-west-1  2/2    2        d1-standard-2
 ```
 
 When something is wrong, the status view explains it in plain terms and tells the developer what to do next:
@@ -170,7 +185,7 @@ $ datumctl compute rollout api
 
 Rolling workload "api"  rev #7 → #8
 
-  PLACEMENT  CITY  UPDATED  READY  OLD   PHASE
+  PLACEMENT  LOCATION  UPDATED  READY  OLD   PHASE
   default    DFW         0      2    2   Pending
   default    IAD         0      2    2   Pending
   default    DFW         1      1    1   Updating
@@ -232,7 +247,7 @@ Tailing logs for workload "api" in DFW, IAD. Ctrl-C to stop.
 Common filters reduce the output without requiring instance name lookup:
 
 ```
-$ datumctl compute logs api --city=IAD --follow
+$ datumctl compute logs api --location=us-east-1 --follow
 $ datumctl compute logs api --since=15m
 $ datumctl compute logs api -c worker --follow
 ```
@@ -246,7 +261,7 @@ When something is wrong with a specific instance, `datumctl compute instances` g
 ```
 $ datumctl compute instances
 
-  NAME          WORKLOAD  CITY  INTERNAL IP   TYPE            AGE   STATUS
+  NAME          WORKLOAD  LOCATION   INTERNAL IP   TYPE            AGE   STATUS
   api-dfw-0     api       DFW   10.4.1.5      d1-standard-2   2d    Running
   api-dfw-1     api       DFW   10.4.1.6      d1-standard-2   2d    Running
   api-iad-0     api       IAD   10.5.1.7      d1-standard-2   2d    Running
@@ -303,8 +318,8 @@ Next steps
 ```
 datumctl compute deploy             Deploy or update a workload
 datumctl compute status             Show health across all cities
-datumctl compute instances          List all instances (--workload, --city to filter)
-datumctl compute logs               Stream logs (--workload, --city, --instance, -c/--container)
+datumctl compute instances          List all instances (--workload, --location to filter)
+datumctl compute logs               Stream logs (--workload, --location, --instance, -c/--container)
 datumctl compute rollout            Watch a rollout in progress
 datumctl compute rollout history    List recent revisions
 datumctl compute rollout undo       Roll back to a previous revision
@@ -327,4 +342,3 @@ datumctl compute cities [list | describe]
 datumctl compute instance-types [list | describe]
 datumctl compute quota [--breakdown | --constrained | --city=CITY]
 ```
-

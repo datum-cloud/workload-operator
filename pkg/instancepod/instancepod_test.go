@@ -627,7 +627,7 @@ func TestIdentityLabels(t *testing.T) {
 				computev1alpha.WorkloadDeploymentNameLabel: "web-dfw",
 				computev1alpha.WorkloadNameLabel:           testWorkloadName,
 				computev1alpha.PlacementNameLabel:          "dfw",
-				computev1alpha.CityCodeLabel:               "DFW",
+				computev1alpha.LocationLabel:               "loc-dfw-1",
 				computev1alpha.InstanceIndexLabel:          "0",
 				computev1alpha.RuntimeClassLabel:           testClassAzurite,
 				"customer-team":                            "payments",
@@ -643,7 +643,7 @@ func TestIdentityLabels(t *testing.T) {
 		computev1alpha.WorkloadDeploymentNameLabel: "web-dfw",
 		computev1alpha.WorkloadNameLabel:           testWorkloadName,
 		computev1alpha.PlacementNameLabel:          "dfw",
-		computev1alpha.CityCodeLabel:               "DFW",
+		computev1alpha.LocationLabel:               "loc-dfw-1",
 		computev1alpha.InstanceIndexLabel:          "0",
 	}
 	if err := diff(want, IdentityLabels(instance)); err != nil {

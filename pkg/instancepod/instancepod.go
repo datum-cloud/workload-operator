@@ -94,7 +94,7 @@ var identityLabelKeys = []string{
 	computev1alpha.WorkloadDeploymentNameLabel,
 	computev1alpha.WorkloadNameLabel,
 	computev1alpha.PlacementNameLabel,
-	computev1alpha.CityCodeLabel,
+	computev1alpha.LocationLabel,
 	computev1alpha.InstanceIndexLabel,
 }
 
