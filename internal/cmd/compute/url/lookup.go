@@ -43,13 +43,13 @@ type Backends struct {
 // Location reports the backends a URL has in one city, and whether that city
 // is taking traffic.
 type Location struct {
-	// City is the location as the platform reports it.
-	City string `json:"city"`
-	// Backends is how many instances in this city back the URL.
+	// Location is the location as the platform reports it.
+	Location string `json:"location"`
+	// Backends is how many instances in this location back the URL.
 	Backends int32 `json:"backends"`
 	// Healthy is how many of them are taking traffic.
 	Healthy int32 `json:"healthy"`
-	// Serving reports whether this city is in rotation.
+	// Serving reports whether this location is in rotation.
 	Serving bool `json:"serving"`
 }
 
@@ -315,7 +315,7 @@ func newInfo(workloadName string, proxy *networkingv1alpha.HTTPProxy, service *n
 		}
 		for _, l := range service.Status.Locations {
 			info.Locations = append(info.Locations, Location{
-				City:     l.Name,
+				Location: l.Name,
 				Backends: l.Members,
 				Healthy:  l.Healthy,
 				Serving:  l.Serving,

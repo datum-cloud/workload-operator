@@ -48,14 +48,14 @@ func TestRenderDetailDegraded(t *testing.T) {
 		t.Errorf("missing the health summary:\n%s", got)
 	}
 
-	if f := row(t, got, "CITY"); strings.Join(f, " ") != "CITY BACKENDS HEALTHY SERVING" {
+	if f := row(t, got, "LOCATION"); strings.Join(f, " ") != "LOCATION BACKENDS HEALTHY SERVING" {
 		t.Errorf("table header = %v", f)
 	}
 	if f := row(t, got, "DFW"); strings.Join(f[1:], " ") != "2 2 yes" {
 		t.Errorf("DFW row = %v, want 2 2 yes", f)
 	}
 	if f := row(t, got, "IAD:"); len(f) == 0 {
-		t.Error("expected a narrative line for the unhealthy city")
+		t.Error("expected a narrative line for the unhealthy location")
 	}
 	if f := row(t, got, "IAD"); strings.Join(f[1:], " ") != "2 0 no" {
 		t.Errorf("IAD row = %v, want 2 0 no", f)
@@ -65,7 +65,7 @@ func TestRenderDetailDegraded(t *testing.T) {
 		"IAD: no healthy backends — instances are running but not passing health checks.",
 		"Traffic is being served from DFW only.",
 		"Next steps:",
-		"datumctl compute instances --workload=api --city=IAD",
+		"datumctl compute instances --workload=api --location=IAD",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)

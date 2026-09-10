@@ -136,7 +136,7 @@ func TestForWorkloadPublished(t *testing.T) {
 	if info.Backends != want {
 		t.Errorf("Backends = %+v, want %+v", info.Backends, want)
 	}
-	if len(info.Locations) != 2 || info.Locations[0] != (Location{City: "DFW", Backends: 2, Healthy: 2, Serving: true}) {
+	if len(info.Locations) != 2 || info.Locations[0] != (Location{Location: "DFW", Backends: 2, Healthy: 2, Serving: true}) {
 		t.Errorf("Locations = %+v", info.Locations)
 	}
 	if info.Proxy == nil || info.Service == nil {

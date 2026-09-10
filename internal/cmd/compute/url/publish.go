@@ -279,9 +279,9 @@ func servingCities(info *Info) []string {
 	serving := make([]string, 0, len(info.Locations))
 	all := make([]string, 0, len(info.Locations))
 	for _, l := range info.Locations {
-		all = append(all, l.City)
+		all = append(all, l.Location)
 		if l.Serving {
-			serving = append(serving, l.City)
+			serving = append(serving, l.Location)
 		}
 	}
 	if len(serving) > 0 {

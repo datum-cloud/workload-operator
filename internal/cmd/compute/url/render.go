@@ -12,7 +12,7 @@ import (
 )
 
 // RenderDetail writes the per-URL detail view: where the URL is, what backs
-// it, and — the part a multi-city platform owes its users — which city is
+// it, and — the part a multi-location platform owes its users — which one is
 // actually serving.
 //
 // Nothing here names the machinery. When something is wrong, the server's own
@@ -74,14 +74,14 @@ func renderBackendLine(out io.Writer, info *Info) {
 	fmt.Fprintf(out, "%-*s port %d/%s\n", labelWidth, "Backend", info.Port, protocol)
 }
 
-// renderLocations prints the per-city breakdown, indented under the label
+// renderLocations prints the per-location breakdown, indented under the label
 // column so it reads as part of the health block.
 func renderLocations(out io.Writer, info *Info) {
 	indent := strings.Repeat(" ", labelWidth+1)
 	tw := util.NewTabWriter(out)
-	fmt.Fprintf(tw, "%sCITY\tBACKENDS\tHEALTHY\tSERVING\n", indent)
+	fmt.Fprintf(tw, "%sLOCATION\tBACKENDS\tHEALTHY\tSERVING\n", indent)
 	for _, l := range info.Locations {
-		fmt.Fprintf(tw, "%s%s\t%d\t%d\t%s\n", indent, l.City, l.Backends, l.Healthy, yesNo(l.Serving))
+		fmt.Fprintf(tw, "%s%s\t%d\t%d\t%s\n", indent, l.Location, l.Backends, l.Healthy, yesNo(l.Serving))
 	}
 	_ = tw.Flush()
 }
@@ -108,7 +108,7 @@ func renderDiagnosis(out io.Writer, info *Info) {
 	var unhealthy []string
 	for _, l := range info.Locations {
 		if l.Backends > 0 && l.Healthy == 0 {
-			unhealthy = append(unhealthy, l.City)
+			unhealthy = append(unhealthy, l.Location)
 		}
 	}
 
@@ -120,12 +120,12 @@ func renderDiagnosis(out io.Writer, info *Info) {
 	fmt.Fprintln(out)
 	indent := strings.Repeat(" ", 7)
 
-	for _, city := range unhealthy {
-		fmt.Fprintf(out, "  %s: no healthy backends — instances are running but not passing health checks.\n", city)
+	for _, location := range unhealthy {
+		fmt.Fprintf(out, "  %s: no healthy backends — instances are running but not passing health checks.\n", location)
 		serving := servingCities(info)
 		switch {
 		case len(serving) == 0:
-			fmt.Fprintf(out, "%sNo city is taking traffic, so the URL is not answering.\n", indent)
+			fmt.Fprintf(out, "%sNo location is taking traffic, so the URL is not answering.\n", indent)
 		case len(serving) == 1:
 			fmt.Fprintf(out, "%sTraffic is being served from %s only.\n", indent, serving[0])
 		default:
@@ -143,8 +143,8 @@ func renderDiagnosis(out io.Writer, info *Info) {
 		fmt.Fprintf(out, "    Check instances:  datumctl compute instances --workload=%s\n", info.WorkloadName)
 		return
 	}
-	for _, city := range unhealthy {
-		fmt.Fprintf(out, "    Check instances:  datumctl compute instances --workload=%s --city=%s\n", info.WorkloadName, city)
+	for _, location := range unhealthy {
+		fmt.Fprintf(out, "    Check instances:  datumctl compute instances --workload=%s --location=%s\n", info.WorkloadName, location)
 	}
 }
 
