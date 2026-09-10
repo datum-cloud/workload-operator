@@ -53,7 +53,7 @@ func fixtureDiscoverer() *fakeDiscoverer {
 	return &fakeDiscoverer{
 		// Deliberately out of alphabetical order, so the sort is proven.
 		locations: []locations.PlacementLocation{
-			{Name: "us-south-dfw", Topology: map[string]string{locations.TopologyCityCodeKey: cityDFW}},
+			{Name: locDFW, Topology: map[string]string{locations.TopologyCityCodeKey: cityDFW}},
 			{Name: "eu-west-ams", Topology: map[string]string{locations.TopologyCityCodeKey: cityAMS}},
 			{Name: "no-city", Topology: map[string]string{"topology.datum.net/region": "unknown"}},
 		},
@@ -108,7 +108,7 @@ func TestLocationsListReportsCityCodesAndSortsByName(t *testing.T) {
 		t.Fatalf("got %d locations, want 3", len(out.Locations))
 	}
 
-	wantOrder := []string{"eu-west-ams", "no-city", "us-south-dfw"}
+	wantOrder := []string{"eu-west-ams", "no-city", locDFW}
 	for i, want := range wantOrder {
 		if got := out.Locations[i].Name; got != want {
 			t.Errorf("locations[%d] = %q, want %q (the list must be sorted by name)", i, got, want)
@@ -119,7 +119,7 @@ func TestLocationsListReportsCityCodesAndSortsByName(t *testing.T) {
 	for _, l := range out.Locations {
 		byName[l.Name] = l
 	}
-	if got := byName["us-south-dfw"].CityCode; got != cityDFW {
+	if got := byName[locDFW].CityCode; got != cityDFW {
 		t.Errorf("us-south-dfw cityCode = %q, want %q", got, cityDFW)
 	}
 	// A location with no city is reported rather than dropped: a placement that
@@ -408,10 +408,10 @@ func TestClientDiscovererReadsComputeAvailability(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
-			location("us-south-dfw", cityDFW),
+			location(locDFW, cityDFW),
 			location("eu-west-ams", cityAMS),
 			location("us-east-iad", "IAD"),
-			availability("compute-dfw", "compute", "us-south-dfw", metav1.ConditionTrue),
+			availability("compute-dfw", "compute", locDFW, metav1.ConditionTrue),
 			// Compute is not up here yet, so it is not somewhere to place.
 			availability("compute-ams", "compute", "eu-west-ams", metav1.ConditionFalse),
 			// Another service is available at IAD. Compute is not, and the
@@ -427,7 +427,7 @@ func TestClientDiscovererReadsComputeAvailability(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("got %d locations %+v, want only the one compute is available at", len(found), found)
 	}
-	if found[0].Name != "us-south-dfw" {
+	if found[0].Name != locDFW {
 		t.Errorf("location = %q, want us-south-dfw", found[0].Name)
 	}
 	if code, ok := found[0].CityCode(); !ok || code != cityDFW {
@@ -492,3 +492,6 @@ func TestLocationsListBlamesTheDeploymentWhenAvailabilityIsNotServed(t *testing.
 	// "ServiceAvailability" travels as an identifier, as a reason code does.
 	checkCopy(t, ToolLocationsList+" not-served error", msg, terms, "ServiceAvailability")
 }
+
+// locDFW is the location name the discovery tests place in DFW.
+const locDFW = "us-south-dfw"

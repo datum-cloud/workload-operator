@@ -253,9 +253,9 @@ func TestListPlacementLocations_ServiceAvailabilityFailsWhenNotServed(t *testing
 				var kind string
 				switch list.(type) {
 				case *servicesv1alpha1.ServiceAvailabilityList:
-					kind = "ServiceAvailability"
+					kind = kindServiceAvailability
 				case *locationsv1alpha1.LocationList:
-					kind = "Location"
+					kind = kindLocation
 				}
 				if kind != "" && missing.Has(kind) {
 					return &apimeta.NoKindMatchError{
@@ -268,9 +268,9 @@ func TestListPlacementLocations_ServiceAvailabilityFailsWhenNotServed(t *testing
 	}
 
 	for name, missing := range map[string][]string{
-		"availability records are not served": {"ServiceAvailability"},
-		"locations are not served":            {"Location"},
-		"neither is served":                   {"ServiceAvailability", "Location"},
+		"availability records are not served": {kindServiceAvailability},
+		"locations are not served":            {kindLocation},
+		"neither is served":                   {kindServiceAvailability, kindLocation},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cl := fake.NewClientBuilder().
@@ -432,3 +432,9 @@ func TestServingLocationGVK(t *testing.T) {
 	_, err = ServingLocationGVK("Nonsense")
 	require.Error(t, err)
 }
+
+// Kinds the not-served tests withhold from the fake client.
+const (
+	kindServiceAvailability = "ServiceAvailability"
+	kindLocation            = "Location"
+)

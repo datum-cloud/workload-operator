@@ -43,9 +43,9 @@ func projectClient(t *testing.T, objs ...client.Object) client.Client {
 func TestListComputeQuotaOrdersRowsAndConvertsUnits(t *testing.T) {
 	c := projectClient(t,
 		// Inserted out of display order, so the ordering is proven.
-		bucket("compute.datumapis.com/vcpus", 8000, 3000, 5000),
-		bucket("compute.datumapis.com/workloads", 10, 3, 7),
-		bucket("compute.datumapis.com/memory", 16384, 4096, 12288),
+		bucket(ResourceTypeVCPUs, 8000, 3000, 5000),
+		bucket(ResourceTypeWorkloads, 10, 3, 7),
+		bucket(ResourceTypeMemory, 16384, 4096, 12288),
 	)
 
 	// No platform client: the server that reads as the person who asked has
@@ -59,9 +59,9 @@ func TestListComputeQuotaOrdersRowsAndConvertsUnits(t *testing.T) {
 	}
 
 	wantOrder := []string{
-		"compute.datumapis.com/workloads",
-		"compute.datumapis.com/vcpus",
-		"compute.datumapis.com/memory",
+		ResourceTypeWorkloads,
+		ResourceTypeVCPUs,
+		ResourceTypeMemory,
 	}
 	for i, want := range wantOrder {
 		if rows[i].ResourceType != want {
@@ -70,7 +70,7 @@ func TestListComputeQuotaOrdersRowsAndConvertsUnits(t *testing.T) {
 	}
 
 	vcpus := rows[1]
-	if vcpus.Unit != "vCPUs" || vcpus.Limit != 8 || vcpus.Used != 3 || vcpus.Available != 5 {
+	if vcpus.Unit != unitVCPUs || vcpus.Limit != 8 || vcpus.Used != 3 || vcpus.Available != 5 {
 		t.Errorf("vCPU row = %+v, want 8/3/5 vCPUs (divided down from millicores)", vcpus)
 	}
 }
@@ -82,7 +82,7 @@ func TestListServiceQuotaIgnoresOtherServices(t *testing.T) {
 		bucket("networking.datumapis.com/networks", 5, 1, 4),
 		bucket("compute.datumapis.com/zzz-new", 2, 0, 2),
 		bucket("compute.datumapis.com/aaa-new", 2, 0, 2),
-		bucket("compute.datumapis.com/workloads", 10, 3, 7),
+		bucket(ResourceTypeWorkloads, 10, 3, 7),
 	)
 
 	rows, err := ListComputeQuota(context.Background(), c, nil)
@@ -91,9 +91,9 @@ func TestListServiceQuotaIgnoresOtherServices(t *testing.T) {
 	}
 
 	want := []string{
-		"compute.datumapis.com/workloads", // explicitly ordered, so first
-		"compute.datumapis.com/aaa-new",   // the rest alphabetically, so a new
-		"compute.datumapis.com/zzz-new",   // resource type lands reproducibly
+		ResourceTypeWorkloads,           // explicitly ordered, so first
+		"compute.datumapis.com/aaa-new", // the rest alphabetically, so a new
+		"compute.datumapis.com/zzz-new", // resource type lands reproducibly
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)

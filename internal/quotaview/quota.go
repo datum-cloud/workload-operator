@@ -55,13 +55,23 @@ type QuotaMeta struct {
 	Order int
 }
 
+// Compute's quota resource types, as registered with the platform.
+const (
+	ResourceTypeWorkloads = "compute.datumapis.com/workloads"
+	ResourceTypeInstances = "compute.datumapis.com/instances"
+	ResourceTypeVCPUs     = "compute.datumapis.com/vcpus"
+	ResourceTypeMemory    = "compute.datumapis.com/memory"
+
+	unitVCPUs = "vCPUs"
+)
+
 // ComputeOrderedTypes is the order compute's resource types are displayed in:
 // the things a person counts first, first.
 var ComputeOrderedTypes = []string{
-	"compute.datumapis.com/workloads",
-	"compute.datumapis.com/instances",
-	"compute.datumapis.com/vcpus",
-	"compute.datumapis.com/memory",
+	ResourceTypeWorkloads,
+	ResourceTypeInstances,
+	ResourceTypeVCPUs,
+	ResourceTypeMemory,
 }
 
 // ComputeMeta supplies display overrides for compute's resource types. The
@@ -69,10 +79,10 @@ var ComputeOrderedTypes = []string{
 // nothing, so the units are named here instead. vCPUs are stored in
 // millicores, hence the divisor.
 var ComputeMeta = map[string]QuotaMeta{
-	"compute.datumapis.com/workloads": {DisplayName: "Workloads", Unit: "workloads", Divisor: 1},
-	"compute.datumapis.com/instances": {DisplayName: "Instances", Unit: "instances", Divisor: 1},
-	"compute.datumapis.com/vcpus":     {DisplayName: "vCPUs", Unit: "vCPUs", Divisor: 1000},
-	"compute.datumapis.com/memory":    {DisplayName: "Memory", Unit: "MiB", Divisor: 1},
+	ResourceTypeWorkloads: {DisplayName: "Workloads", Unit: "workloads", Divisor: 1},
+	ResourceTypeInstances: {DisplayName: "Instances", Unit: "instances", Divisor: 1},
+	ResourceTypeVCPUs:     {DisplayName: unitVCPUs, Unit: unitVCPUs, Divisor: 1000},
+	ResourceTypeMemory:    {DisplayName: "Memory", Unit: "MiB", Divisor: 1},
 }
 
 // ListServiceQuota returns quota rows for the project's quota whose resource
