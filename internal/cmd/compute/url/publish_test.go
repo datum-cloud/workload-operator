@@ -79,8 +79,8 @@ func TestPublishCreatesBackendsBeforeTheProxy(t *testing.T) {
 	if !strings.Contains(out.String(), "Detached") {
 		t.Errorf("output = %q, want a detach note", out.String())
 	}
-	if !strings.Contains(out.String(), "datumctl compute open api") {
-		t.Errorf("output = %q, want a pointer to `datumctl compute open`", out.String())
+	if !strings.Contains(out.String(), "datumctl compute workloads describe api") {
+		t.Errorf("output = %q, want a pointer to `datumctl compute workloads describe`", out.String())
 	}
 
 	var svc networkingv1alpha.NetworkService

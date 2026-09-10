@@ -29,7 +29,11 @@ func RenderDetail(out io.Writer, info *Info) {
 	renderURLs(out, info)
 	renderBackendLine(out, info)
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "%-*s %s\n", labelWidth, "Health", health(info))
+	// "Serving", not "Health": this block is embedded under a workload's own
+	// Health line, and two identically labelled rows at the same indent read as
+	// a contradiction rather than two different facts. Backend health is about
+	// whether the URL is taking traffic.
+	fmt.Fprintf(out, "%-*s %s\n", labelWidth, "Serving", health(info))
 
 	if len(info.Locations) > 0 {
 		fmt.Fprintln(out)

@@ -125,7 +125,7 @@ func Declare(
 // to pick it back up.
 func detached(out io.Writer, workloadName string) {
 	fmt.Fprintf(out, "\nDetached. Publishing continues in the background.\n")
-	fmt.Fprintf(out, "  Check it with: datumctl compute open %s\n", workloadName)
+	fmt.Fprintf(out, "  Check it with: datumctl compute workloads describe %s\n", workloadName)
 }
 
 // Wait polls until the workload's URL is live, printing each stage as it
@@ -179,7 +179,7 @@ func Wait(ctx context.Context, out io.Writer, c client.Client, workloadName stri
 
 		case <-deadline.C:
 			return nil, fmt.Errorf(
-				"the URL for %q was still not answering after %s — it may yet come up; check it with: datumctl compute open %s",
+				"the URL for %q was still not answering after %s — it may yet come up; check it with: datumctl compute workloads describe %s",
 				workloadName, maxWait, workloadName)
 
 		case <-ticker.C:

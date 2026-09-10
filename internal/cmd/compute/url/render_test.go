@@ -42,7 +42,9 @@ func TestRenderDetailDegraded(t *testing.T) {
 	if f := row(t, got, "Backend"); f[1] != "port" || f[2] != "8080/tcp" {
 		t.Errorf("Backend row = %v, want port 8080/tcp", f)
 	}
-	if !strings.Contains(got, "Health       Degraded — 2 of 4 backends healthy") {
+	// "Serving", not "Health": this block renders under a workload's own Health
+	// line in `workloads describe`, so the labels have to stay distinguishable.
+	if !strings.Contains(got, "Serving      Degraded — 2 of 4 backends healthy") {
 		t.Errorf("missing the health summary:\n%s", got)
 	}
 

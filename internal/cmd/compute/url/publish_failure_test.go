@@ -359,7 +359,7 @@ func TestPublishDetachesWhenInterruptedMidWrite(t *testing.T) {
 			if !strings.Contains(out.String(), "Detached") {
 				t.Errorf("output = %q, want the same detach note the wait prints", out.String())
 			}
-			if !strings.Contains(out.String(), "datumctl compute open "+testWorkloadName) {
+			if !strings.Contains(out.String(), "datumctl compute workloads describe "+testWorkloadName) {
 				t.Errorf("output = %q, want a pointer to how to pick it up again", out.String())
 			}
 		})

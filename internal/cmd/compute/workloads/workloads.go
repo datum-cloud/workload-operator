@@ -566,6 +566,16 @@ func runDescribe(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "%-12s %s\n", "Health", health)
 	fmt.Fprintf(out, "\n")
 
+	// URL block. A workload that was never published simply has no URL, so a
+	// lookup failure is reported and skipped rather than failing the whole
+	// describe — the config and health above are still what the user asked for.
+	if info, err := url.ForWorkload(ctx, c, workloadName); err != nil {
+		fmt.Fprintf(out, "URL\n  (could not be read: %v)\n\n", err)
+	} else if info != nil {
+		url.RenderDetail(out, info)
+		fmt.Fprintf(out, "\n")
+	}
+
 	// Placements block.
 	fmt.Fprintf(out, "Placements\n")
 	if len(wl.Spec.Placements) == 0 {

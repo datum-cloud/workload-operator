@@ -558,18 +558,18 @@ func publish(ctx context.Context, out io.Writer, c client.Client, w *computev1al
 // existingHostnames returns the custom hostnames already attached to the
 // workload's URL, so republishing carries them forward.
 //
-// Publishing rewrites the proxy spec wholesale. Without this, every redeploy
-// of a workload would silently detach the hostnames 'datumctl compute domains
-// add' put there, and the custom domain would stop answering — an unpublish
-// the user never asked for. Detaching a hostname is 'domains remove' and
-// nothing else.
+// Publishing rewrites the proxy spec wholesale. Custom hostnames are not set by
+// this plugin — they are configured out of band, by the ALB tooling that owns
+// advanced proxy configuration — so without this every redeploy would silently
+// detach them and the custom domain would stop answering. That matters more,
+// not less, for hostnames this plugin cannot see itself having added.
 //
 // It fails closed. A workload that has never been published has no hostnames
 // and that is a nil with no error, but a control plane that cannot be read is
 // an error the caller must stop on: the two calls use different verbs on the
 // same object — a List here, a Get in the apply — so a control plane that
 // refuses one and answers the other would otherwise rewrite spec.Hostnames to
-// nothing and detach every custom domain while the deploy reported success.
+// nothing and report success.
 func existingHostnames(ctx context.Context, c client.Client, workloadName string) ([]string, error) {
 	info, err := url.ForWorkload(ctx, c, workloadName)
 	if err != nil {
