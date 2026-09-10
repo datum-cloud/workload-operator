@@ -18,7 +18,7 @@ require (
 	// same one network-services-operator pins. The module publishes no tag yet.
 	go.miloapis.com/locations v0.0.0-20260825185141-507ac2cbd48c
 	go.miloapis.com/milo v0.32.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/sync v0.22.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	k8s.io/api v0.36.1
