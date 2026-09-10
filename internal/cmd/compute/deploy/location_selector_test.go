@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+const (
+	testCity             = "DFW"
+	testLocation         = "us-east-1"
+	errMutuallyExclusive = "mutually exclusive"
+)
+
 // TestResolveLocationSelector pins the three mutually exclusive ways a deploy
 // says where to run. This validation was lifted out of deployFromFlags to keep
 // it under the complexity limit, so it needs its own coverage: nothing else
@@ -24,28 +30,28 @@ func TestResolveLocationSelector(t *testing.T) {
 		wantErr: "--location is required",
 	}, {
 		name:    "location and city together",
-		opts:    options{locations: []string{"us-east-1"}, cities: []string{"DFW"}},
-		wantErr: "mutually exclusive",
+		opts:    options{locations: []string{testLocation}, cities: []string{testCity}},
+		wantErr: errMutuallyExclusive,
 	}, {
 		name:    "location and selector together",
-		opts:    options{locations: []string{"us-east-1"}, locationSelector: "a=b"},
-		wantErr: "mutually exclusive",
+		opts:    options{locations: []string{testLocation}, locationSelector: "a=b"},
+		wantErr: errMutuallyExclusive,
 	}, {
 		name:    "all three together",
-		opts:    options{locations: []string{"us-east-1"}, cities: []string{"DFW"}, locationSelector: "a=b"},
-		wantErr: "mutually exclusive",
+		opts:    options{locations: []string{testLocation}, cities: []string{testCity}, locationSelector: "a=b"},
+		wantErr: errMutuallyExclusive,
 	}, {
 		name:    "named locations need no selector",
-		opts:    options{locations: []string{"us-east-1", "eu-west-1"}},
+		opts:    options{locations: []string{testLocation, "eu-west-1"}},
 		wantNil: true,
 	}, {
 		name:        "cities become a city-code selector",
-		opts:        options{cities: []string{"DFW"}},
-		wantMatches: map[string]string{"topology.datum.net/city-code": "DFW"},
+		opts:        options{cities: []string{testCity}},
+		wantMatches: map[string]string{"topology.datum.net/city-code": testCity},
 	}, {
 		name:        "an explicit selector is parsed",
 		opts:        options{locationSelector: "topology.datum.net/region=us-east-1"},
-		wantMatches: map[string]string{"topology.datum.net/region": "us-east-1"},
+		wantMatches: map[string]string{"topology.datum.net/region": testLocation},
 	}, {
 		name:    "an unparseable selector is reported, not ignored",
 		opts:    options{locationSelector: "=="},
