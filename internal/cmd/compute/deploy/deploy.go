@@ -229,6 +229,37 @@ func runDeploy(cmd *cobra.Command, args []string, opts *options) error {
 }
 
 // deployFromFlags implements Path A: deploy a workload using CLI flags.
+// resolveLocationSelector validates the three mutually exclusive ways a deploy
+// can say where to run, and returns the selector they resolve to. --location
+// names its locations outright and needs no selector, so a nil return with a
+// nil error means "the locations were named".
+func resolveLocationSelector(opts *options) (*metav1.LabelSelector, error) {
+	set := 0
+	for _, given := range []bool{len(opts.locations) > 0, len(opts.cities) > 0, opts.locationSelector != ""} {
+		if given {
+			set++
+		}
+	}
+	switch {
+	case set == 0:
+		return nil, fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); or use --city to deploy to every location in a city, or --location-selector to select locations by topology")
+	case set > 1:
+		return nil, fmt.Errorf("--location, --city, and --location-selector are mutually exclusive")
+	}
+
+	if opts.locationSelector != "" {
+		parsed, err := metav1.ParseToLabelSelector(opts.locationSelector)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --location-selector %q: %w", opts.locationSelector, err)
+		}
+		return parsed, nil
+	}
+	if len(opts.cities) > 0 {
+		return computev1alpha.CityCodeSelector(opts.cities), nil
+	}
+	return nil, nil
+}
+
 func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) error {
 	project := util.ProjectFromCmd(cmd)
 	if project == "" {
@@ -237,28 +268,9 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 	if opts.image == "" {
 		return fmt.Errorf("--image is required")
 	}
-	placementFlags := 0
-	for _, set := range []bool{len(opts.locations) > 0, len(opts.cities) > 0, opts.locationSelector != ""} {
-		if set {
-			placementFlags++
-		}
-	}
-	if placementFlags == 0 {
-		return fmt.Errorf("--location is required (e.g. --location=us-east-1,eu-west-1); or use --city to deploy to every location in a city, or --location-selector to select locations by topology")
-	}
-	if placementFlags > 1 {
-		return fmt.Errorf("--location, --city, and --location-selector are mutually exclusive")
-	}
-	var locationSelector *metav1.LabelSelector
-	if opts.locationSelector != "" {
-		parsed, err := metav1.ParseToLabelSelector(opts.locationSelector)
-		if err != nil {
-			return fmt.Errorf("invalid --location-selector %q: %w", opts.locationSelector, err)
-		}
-		locationSelector = parsed
-	}
-	if len(opts.cities) > 0 {
-		locationSelector = computev1alpha.CityCodeSelector(opts.cities)
+	locationSelector, err := resolveLocationSelector(opts)
+	if err != nil {
+		return err
 	}
 	instanceType := opts.instanceType
 	if instanceType == "" {

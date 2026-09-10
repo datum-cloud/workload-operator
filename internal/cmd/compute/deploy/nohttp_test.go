@@ -396,7 +396,7 @@ func TestManifestDeployReportsTheDeadEnd(t *testing.T) {
 	})
 
 	t.Run("a declared http port is not a dead end", func(t *testing.T) {
-		w := workloadWithPorts(computev1alpha.NamedPort{Name: "http", Port: 8080})
+		w := workloadWithPorts(computev1alpha.NamedPort{Name: httpPortName, Port: 8080})
 
 		var out bytes.Buffer
 		reportManifestReachability(&out, &w)

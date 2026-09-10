@@ -187,7 +187,7 @@ func TestDeclaredHTTPPort(t *testing.T) {
 		},
 		{
 			name:     "the http port",
-			workload: workloadWithPorts(computev1alpha.NamedPort{Name: "http", Port: 8080, Protocol: &tcp}),
+			workload: workloadWithPorts(computev1alpha.NamedPort{Name: httpPortName, Port: 8080, Protocol: &tcp}),
 			want:     8080,
 		},
 		{
