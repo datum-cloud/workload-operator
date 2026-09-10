@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,6 +21,7 @@ import (
 	"go.datum.net/compute/internal/cmd/compute/build"
 	"go.datum.net/compute/internal/cmd/compute/util"
 	"go.datum.net/compute/internal/cmd/compute/watch"
+	"go.datum.net/compute/internal/workloadspec"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -174,49 +174,32 @@ func deployFromFlags(cmd *cobra.Command, workloadName string, opts *options) err
 		}
 	}
 
-	// Build spec.
-	tcp := corev1.ProtocolTCP
-	container := computev1alpha.SandboxContainer{
-		Name:  "app",
-		Image: opts.image,
-	}
-	if opts.port > 0 {
-		container.Ports = []computev1alpha.NamedPort{
-			{Name: "http", Port: opts.port, Protocol: &tcp},
-		}
-	}
-
-	// All cities go into one "default" placement.
-	placement := computev1alpha.WorkloadPlacement{
-		Name:      "default",
-		CityCodes: opts.cities,
-		ScaleSettings: computev1alpha.HorizontalScaleSettings{
-			MinReplicas:              opts.min,
-			InstanceManagementPolicy: computev1alpha.OrderedReadyInstanceManagementPolicyType,
-		},
-	}
-
-	workload.Spec = computev1alpha.WorkloadSpec{
-		Template: computev1alpha.InstanceTemplateSpec{
-			Spec: computev1alpha.InstanceSpec{
-				Runtime: computev1alpha.InstanceRuntimeSpec{
-					Resources: computev1alpha.InstanceRuntimeResources{
-						InstanceType: instanceType,
-					},
-					Sandbox: &computev1alpha.SandboxRuntime{
-						Containers: []computev1alpha.SandboxContainer{container},
-					},
-				},
-				NetworkInterfaces: []computev1alpha.InstanceNetworkInterface{
-					{
-						// TODO: "default" network name is a convention; confirm with platform team.
-						Network: networkingv1alpha.NetworkRef{Name: "default"},
-					},
-				},
+	// Build spec. workloadspec owns the shape of a rendered manifest, so the
+	// same inputs produce the same workload here and anywhere else it is used.
+	in := workloadspec.Input{
+		Name:         workloadName,
+		Image:        opts.image,
+		InstanceType: instanceType,
+		// TODO: "default" network name is a convention; confirm with platform team.
+		Network: workloadspec.DefaultNetwork,
+		// All cities go into one "default" placement.
+		Placements: []workloadspec.Placement{
+			{
+				Name:        workloadspec.DefaultPlacementName,
+				CityCodes:   opts.cities,
+				MinReplicas: opts.min,
 			},
 		},
-		Placements: []computev1alpha.WorkloadPlacement{placement},
 	}
+	if opts.port > 0 {
+		in.Ports = []workloadspec.Port{{Name: "http", Port: opts.port}}
+	}
+
+	rendered, err := workloadspec.Render(in)
+	if err != nil {
+		return err
+	}
+	workload.Spec = rendered.Spec
 
 	fmt.Fprintf(out, "  Placement \"default\": cities=[%s], min=%d\n",
 		strings.Join(opts.cities, ", "), opts.min)

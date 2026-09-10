@@ -22,7 +22,7 @@ end.
    - `CityCodeMismatch` — the workload asked for one city and was sent to
      another. It was routed to the wrong place.
 
-2. **Confirm the scope.** `workloads_list` shows whether other workloads in the
+2. **Confirm the scope.** `compute_workloads_list` shows whether other workloads in the
    same placement are also failing. Several failing in one place is a
    location-wide problem and is worth reporting as such; a single one may be a
    leftover deployment.
@@ -33,7 +33,7 @@ end.
 
 4. **Escalate with specifics.** Datum needs: the WorkloadDeployment name, its
    `cityCode`, its (empty or wrong) `location`, and the status message. Pull
-   these from `workloads_get`.
+   these from `compute_workloads_get`.
 
 ## Reporting
 
