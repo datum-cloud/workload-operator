@@ -10,10 +10,14 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	// Pinned to network-services-operator main: the latest tag (v0.26.0)
-	// predates the Prepared condition this gate reads. Re-pin to a tagged
-	// release once one carries it.
-	go.datum.net/network-services-operator v0.26.1-0.20260821014231-aceb24b1b569
+	// UNMERGED: pinned to the head of network-services-operator#411
+	// (branch proto/network-service), which adds the NetworkService API and the
+	// networkService HTTPProxy backend that `datumctl compute --http-port` needs.
+	// That PR is a draft and its branch may be force-pushed or deleted, which
+	// would break `go mod download` here. Re-pin to main as soon as it merges.
+	// The pre-411 pin was chosen for the Prepared condition, which this commit
+	// also carries.
+	go.datum.net/network-services-operator v0.26.5-0.20260909170421-bcd1965a821c
 	// Pinned by pseudo-version to the commit deployed to staging, which is the
 	// same one network-services-operator pins. The module publishes no tag yet.
 	go.miloapis.com/locations v0.0.0-20260825185141-507ac2cbd48c
@@ -116,7 +120,7 @@ require (
 	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/swag v0.25.4 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/google/cel-go v0.26.0 // indirect
+	github.com/google/cel-go v0.27.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/google/uuid v1.6.0 // indirect
