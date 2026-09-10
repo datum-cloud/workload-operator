@@ -21,11 +21,15 @@ import (
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	"go.datum.net/compute/internal/validation"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
 const (
 	testSSHKey       = "user:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILPbDbsv9fgEnam9iJ5b51Na/WieeiKCJRC0+m7fRwPk vscode@42aafaf8293e"
 	testCityCode     = "DFW"
+	testLocation     = "us-south-dfw-1"
+	testSelectorPath = "placements[0].locationSelector"
+	testLocationB    = "us-south-dfw-2"
 	testImage        = "ghcr.io/acme/api:1.4.2"
 	testWorkload     = "api"
 	testPlacement    = "us"
@@ -49,13 +53,22 @@ func validInput(tweaks ...func(*Input)) Input {
 		Name:  testWorkload,
 		Image: testImage,
 		Placements: []Placement{
-			{Name: testPlacement, CityCodes: []string{testCityCode}, MinReplicas: 2},
+			{Name: testPlacement, Locations: []string{testLocation}, MinReplicas: 2},
 		},
 	}
 	for _, tweak := range tweaks {
 		tweak(&in)
 	}
 	return in
+}
+
+// cityCodeSelector is the selector that places at every location in a city,
+// which is the form the CLI's --city shorthand and the deprecated cityCodes
+// field both resolve to.
+func cityCodeSelector(cityCode string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchLabels: map[string]string{locationsv1alpha1.TopologyCityCodeKey: cityCode},
+	}
 }
 
 func mustRender(t *testing.T, in Input) *computev1alpha.Workload {
@@ -147,7 +160,7 @@ func TestRenderDefaults(t *testing.T) {
 	w := mustRender(t, Input{
 		Name:       testWorkload,
 		Image:      testImage,
-		Placements: []Placement{{CityCodes: []string{testCityCode}}},
+		Placements: []Placement{{Locations: []string{testLocation}}},
 	})
 
 	p := w.Spec.Placements[0]
@@ -393,9 +406,43 @@ func TestRenderErrors(t *testing.T) {
 			input:    validInput(func(in *Input) { in.Placements = nil }),
 			wantPath: "placements",
 		},
-		"placement without city codes": {
+		"placement naming nowhere": {
 			input:    validInput(func(in *Input) { in.Placements = []Placement{{Name: testPlacement}} }),
-			wantPath: "placements[0].cityCodes",
+			wantPath: "placements[0].locations",
+		},
+		"placement with both locations and a selector": {
+			input: validInput(func(in *Input) {
+				in.Placements[0].LocationSelector = cityCodeSelector(testCityCode)
+			}),
+			wantPath: testSelectorPath,
+		},
+		"empty location selector": {
+			input: validInput(func(in *Input) {
+				in.Placements[0].Locations = nil
+				in.Placements[0].LocationSelector = &metav1.LabelSelector{}
+			}),
+			wantPath: testSelectorPath,
+		},
+		"malformed location selector": {
+			input: validInput(func(in *Input) {
+				in.Placements[0].Locations = nil
+				in.Placements[0].LocationSelector = &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{{
+						Key: locationsv1alpha1.TopologyCityCodeKey, Operator: metav1.LabelSelectorOpIn,
+					}},
+				}
+			}),
+			wantPath: testSelectorPath,
+		},
+		"duplicate locations in one placement": {
+			input: validInput(func(in *Input) {
+				in.Placements[0].Locations = []string{testLocation, testLocation}
+			}),
+			wantPath: "placements[0].locations[1]",
+		},
+		"location name is not a DNS subdomain": {
+			input:    validInput(func(in *Input) { in.Placements[0].Locations = []string{"Not A Location"} }),
+			wantPath: "placements[0].locations[0]",
 		},
 		"placement name is not a DNS label": {
 			input:    validInput(func(in *Input) { in.Placements[0].Name = "US East" }),
@@ -521,10 +568,14 @@ func TestRenderedManifestsPassAdmission(t *testing.T) {
 			in.Ports = []Port{{Name: "ssh", Port: 22}}
 			in.ConfigMounts = []Mount{{Secret: testSecretName, MountPath: testCredsPath}}
 		}),
+		"a placement that selects its locations by city": validInput(func(in *Input) {
+			in.Placements[0].Locations = nil
+			in.Placements[0].LocationSelector = cityCodeSelector(testCityCode)
+		}),
 		"multiple placements at the replica limits": validInput(func(in *Input) {
 			in.Placements = []Placement{
-				{Name: testPlacement, CityCodes: []string{testCityCode}, MinReplicas: 1},
-				{Name: testPlacement + "-east", CityCodes: []string{testCityCode}, MinReplicas: 1000},
+				{Name: testPlacement, Locations: []string{testLocation}, MinReplicas: 1},
+				{Name: testPlacement + "-east", Locations: []string{testLocationB}, MinReplicas: 1000},
 			}
 		}),
 	}
@@ -534,10 +585,18 @@ func TestRenderedManifestsPassAdmission(t *testing.T) {
 			w := mustRender(t, in)
 
 			opts := validation.WorkloadValidationOptions{
-				Context:        context.Background(),
-				Client:         allowAllClient(t),
-				Workload:       w,
-				ValidCityCodes: []string{testCityCode},
+				Context:  context.Background(),
+				Client:   allowAllClient(t),
+				Workload: w,
+				// The locations the project may place at, and the topology a
+				// locationSelector is matched against. Both have to be given:
+				// admission rejects a name that is not entitled and a selector
+				// that matches nowhere.
+				ValidLocations: []string{testLocation, testLocationB},
+				LocationTopologies: map[string]map[string]string{
+					testLocation:  {locationsv1alpha1.TopologyCityCodeKey: testCityCode},
+					testLocationB: {locationsv1alpha1.TopologyCityCodeKey: testCityCode},
+				},
 			}
 
 			if errs := validation.ValidateWorkloadCreate(w, opts); len(errs) > 0 {
@@ -574,95 +633,6 @@ func allowAllClient(t *testing.T) client.Client {
 			ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: DefaultNetwork},
 		}).
 		Build()
-}
-
-// TestDeployFromFlagsParity pins the manifest the CLI's flag path produces to
-// the one it produced before spec building moved into this package. The
-// literal below is the previous deployFromFlags construction, verbatim.
-func TestDeployFromFlagsParity(t *testing.T) {
-	const (
-		instanceType = DefaultInstanceType
-		minReplicas  = int32(2)
-		port         = int32(8080)
-	)
-	cities := []string{testCityCode, "IAD"}
-
-	previous := func(withPort bool) computev1alpha.WorkloadSpec {
-		tcp := corev1.ProtocolTCP
-		container := computev1alpha.SandboxContainer{
-			Name:  "app",
-			Image: testImage,
-		}
-		if withPort {
-			container.Ports = []computev1alpha.NamedPort{
-				{Name: testPortName, Port: port, Protocol: &tcp},
-			}
-		}
-
-		return computev1alpha.WorkloadSpec{
-			Template: computev1alpha.InstanceTemplateSpec{
-				Spec: computev1alpha.InstanceSpec{
-					Runtime: computev1alpha.InstanceRuntimeSpec{
-						Resources: computev1alpha.InstanceRuntimeResources{
-							InstanceType: instanceType,
-						},
-						Sandbox: &computev1alpha.SandboxRuntime{
-							Containers: []computev1alpha.SandboxContainer{container},
-						},
-					},
-					NetworkInterfaces: []computev1alpha.InstanceNetworkInterface{
-						{Network: networkingv1alpha.NetworkRef{Name: "default"}},
-					},
-				},
-			},
-			Placements: []computev1alpha.WorkloadPlacement{{
-				Name:      "default",
-				CityCodes: cities,
-				ScaleSettings: computev1alpha.HorizontalScaleSettings{
-					MinReplicas:              minReplicas,
-					InstanceManagementPolicy: computev1alpha.OrderedReadyInstanceManagementPolicyType,
-				},
-			}},
-		}
-	}
-
-	// What deployFromFlags builds now.
-	in := Input{
-		Name:         testWorkload,
-		Image:        testImage,
-		InstanceType: instanceType,
-		Network:      DefaultNetwork,
-		Placements: []Placement{{
-			Name:        DefaultPlacementName,
-			CityCodes:   cities,
-			MinReplicas: minReplicas,
-		}},
-	}
-
-	t.Run("without a port", func(t *testing.T) {
-		got := mustRender(t, in).Spec
-		if delta := cmp.Diff(previous(false), got); delta != "" {
-			t.Errorf("spec differs from the pre-refactor manifest (-want +got):\n%s", delta)
-		}
-	})
-
-	// With a port the only intended difference is the ingress rule that makes
-	// the port reachable, which the flag path did not emit before.
-	t.Run("with a port", func(t *testing.T) {
-		withPort := in
-		withPort.Ports = []Port{{Name: testPortName, Port: port}}
-
-		got := mustRender(t, withPort).Spec
-		if got.Template.Spec.NetworkInterfaces[0].NetworkPolicy == nil {
-			t.Fatal("expected an ingress rule for the exposed port")
-		}
-
-		got = *got.DeepCopy()
-		got.Template.Spec.NetworkInterfaces[0].NetworkPolicy = nil
-		if delta := cmp.Diff(previous(true), got); delta != "" {
-			t.Errorf("spec differs from the pre-refactor manifest beyond the network policy (-want +got):\n%s", delta)
-		}
-	})
 }
 
 func TestDefaults(t *testing.T) {

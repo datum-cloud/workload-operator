@@ -25,7 +25,9 @@ export type Condition = z.infer<typeof conditionSchema>;
 
 export const workloadPlacementSchema = z.object({
   name: z.string(),
-  cityCodes: z.array(z.string()).default([]),
+  locations: z.array(z.string()).default([]),
+  /** Topology selector the placement resolves through, when it does not name locations. */
+  locationSelector: z.string().optional(),
   readyReplicas: z.number(),
   desiredReplicas: z.number(),
   currentReplicas: z.number(),
@@ -49,7 +51,7 @@ export const workloadResourceSchema = z.object({
   placements: z.array(workloadPlacementSchema).default([]),
   conditions: z.array(conditionSchema).default([]),
   runtimeType: z.string().optional(),
-  regions: z.array(z.string()).default([]),
+  locations: z.array(z.string()).default([]),
   resources: z.string().optional(),
   replicasPerRegion: z.number().optional(),
 });
@@ -89,7 +91,7 @@ export const instanceResourceSchema = z.object({
   name: z.string(),
   namespace: z.string().optional(),
   createdAt: z.coerce.date(),
-  city: z.string().optional(),
+  location: z.string().optional(),
   placement: z.string().optional(),
   instanceType: z.string().optional(),
   cpu: z.string().optional(),

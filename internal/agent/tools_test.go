@@ -20,6 +20,8 @@ const (
 	wlEdgeCache        = "edge-cache"
 	depAPIBackend      = "api-backend-a"
 	placementUSCentral = "us-central"
+	locationDFW        = "loc-dfw-1"
+	locationAMS        = "loc-ams-1"
 	cityDFW            = "DFW"
 	cityAMS            = "AMS"
 )
@@ -94,7 +96,7 @@ func fixtureReader() *fakeReader {
 		i.Labels = map[string]string{
 			computev1alpha.WorkloadDeploymentNameLabel: depAPIBackend,
 			computev1alpha.PlacementNameLabel:          placementUSCentral,
-			computev1alpha.CityCodeLabel:               cityDFW,
+			computev1alpha.LocationLabel:               locationDFW,
 		}
 		return i
 	}
@@ -108,7 +110,7 @@ func fixtureReader() *fakeReader {
 		i.Labels = map[string]string{
 			computev1alpha.WorkloadDeploymentNameLabel: depAPIBackend,
 			computev1alpha.PlacementNameLabel:          placementUSCentral,
-			computev1alpha.CityCodeLabel:               cityDFW,
+			computev1alpha.LocationLabel:               locationDFW,
 		}
 		return i
 	}
@@ -118,13 +120,13 @@ func fixtureReader() *fakeReader {
 			computev1alpha.WorkloadDeploymentReasonNoMatchingLocation,
 			"The cell has not been told which location it serves."))
 	edgeDeployment.Spec.PlacementName = "ams-edge"
-	edgeDeployment.Spec.CityCode = cityAMS
+	edgeDeployment.Spec.LocationRef.Name = locationAMS
 
 	apiDeployment := deployment(depAPIBackend,
 		cond(computev1alpha.WorkloadDeploymentAvailable, "False",
 			computev1alpha.WorkloadDeploymentReasonQuotaNotGranted, "Quota is blocking 4 instances."))
 	apiDeployment.Spec.PlacementName = placementUSCentral
-	apiDeployment.Spec.CityCode = cityDFW
+	apiDeployment.Spec.LocationRef.Name = locationDFW
 
 	return &fakeReader{
 		workloads: []computev1alpha.Workload{*healthy, *quotaBlocked, *placementBlocked},
@@ -215,8 +217,8 @@ func TestWorkloadsGetReturnsFullTree(t *testing.T) {
 	if len(out.Deployments) != 1 {
 		t.Fatalf("got %d deployments, want 1", len(out.Deployments))
 	}
-	if d := out.Deployments[0]; d.Placement != placementUSCentral || d.CityCode != cityDFW {
-		t.Errorf("deployment placement/city = %q/%q, want us-central/DFW", d.Placement, d.CityCode)
+	if d := out.Deployments[0]; d.Placement != placementUSCentral || d.Location != locationDFW {
+		t.Errorf("deployment placement/location = %q/%q, want us-central/loc-dfw-1", d.Placement, d.Location)
 	}
 	if len(out.Instances) != 3 {
 		t.Fatalf("got %d instances, want 3", len(out.Instances))

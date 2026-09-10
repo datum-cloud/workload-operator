@@ -89,6 +89,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(config.AddToScheme(scheme))
+	utilruntime.Must(locationsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(config.RegisterDefaults(scheme))
 	utilruntime.Must(computev1alpha.AddToScheme(scheme))
 	utilruntime.Must(networkingv1alpha.AddToScheme(scheme))
@@ -163,7 +164,10 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	setupLog.Info("feature gates", "NetworkingIntegration", features.FeatureGate.Enabled(features.NetworkingIntegration))
+	setupLog.Info("feature gates",
+		"NetworkingIntegration", features.FeatureGate.Enabled(features.NetworkingIntegration),
+		"RuntimeClasses", features.FeatureGate.Enabled(features.RuntimeClasses),
+	)
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -845,8 +849,9 @@ func setupManagementControllers(mgr mcmanager.Manager, federationClient client.C
 	// aggregated downstream by Karmada is mirrored back to the project WD
 	// immediately instead of on the next informer resync.
 	federator := &controller.WorkloadDeploymentFederator{
-		FederationClient:  federationClient,
-		FederationCluster: federationMgr,
+		FederationClient:      federationClient,
+		FederationCluster:     federationMgr,
+		RuntimeClassesEnabled: features.FeatureGate.Enabled(features.RuntimeClasses),
 	}
 	if err := federator.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("WorkloadDeploymentFederator: %w", err)

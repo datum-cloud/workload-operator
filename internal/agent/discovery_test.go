@@ -53,9 +53,13 @@ func fixtureDiscoverer() *fakeDiscoverer {
 	return &fakeDiscoverer{
 		// Deliberately out of alphabetical order, so the sort is proven.
 		locations: []locations.PlacementLocation{
-			{Name: locDFW, Topology: map[string]string{locations.TopologyCityCodeKey: cityDFW}},
-			{Name: "eu-west-ams", Topology: map[string]string{locations.TopologyCityCodeKey: cityAMS}},
-			{Name: "no-city", Topology: map[string]string{"topology.datum.net/region": "unknown"}},
+			{Name: locDFW, Topology: map[string]string{locations.TopologyCityCodeKey: cityDFW},
+				Ready: true, ServiceAvailable: true},
+			{Name: "eu-west-ams", Topology: map[string]string{locations.TopologyCityCodeKey: cityAMS},
+				Ready: true, ServiceAvailable: true},
+			// Compute is offered here, but the location is not serving yet.
+			{Name: "no-city", Topology: map[string]string{"topology.datum.net/region": "unknown"},
+				ServiceAvailable: true},
 		},
 		networks: []networkingv1alpha.Network{
 			network("staging", []networkingv1alpha.IPFamily{networkingv1alpha.IPv6Protocol},
@@ -129,6 +133,15 @@ func TestLocationsListReportsCityCodesAndSortsByName(t *testing.T) {
 	}
 	if len(byName["no-city"].Topology) == 0 {
 		t.Error("no-city lost its topology; the attributes are what is left to match on")
+	}
+	// Readiness is reported rather than filtered on: a placement naming a
+	// location that is not serving yet will not be scheduled, and the model has
+	// to be able to say so instead of the customer finding out afterwards.
+	if !byName[locDFW].Placeable {
+		t.Error("us-south-dfw is Ready and compute is available; want placeable")
+	}
+	if byName["no-city"].Placeable || byName["no-city"].Ready {
+		t.Error("no-city is not Ready; want placeable and ready both false")
 	}
 }
 
@@ -385,6 +398,14 @@ func TestClientDiscovererReadsComputeAvailability(t *testing.T) {
 				LocationClassRef: locationsv1alpha1.LocationClassReference{Name: "datum-managed"},
 				Topology:         map[string]string{locations.TopologyCityCodeKey: cityCode},
 			},
+			Status: locationsv1alpha1.LocationStatus{
+				Conditions: []metav1.Condition{{
+					Type:               locationsv1alpha1.LocationConditionReady,
+					Status:             metav1.ConditionTrue,
+					Reason:             "Ready",
+					LastTransitionTime: metav1.Now(),
+				}},
+			},
 		}
 	}
 	availability := func(name, service, at string, status metav1.ConditionStatus) *servicesv1alpha1.ServiceAvailability {
@@ -432,6 +453,9 @@ func TestClientDiscovererReadsComputeAvailability(t *testing.T) {
 	}
 	if code, ok := found[0].CityCode(); !ok || code != cityDFW {
 		t.Errorf("cityCode = %q (declared %v), want %q from the location itself", code, ok, cityDFW)
+	}
+	if !found[0].Placeable() {
+		t.Error("the location is Ready and compute is available there; want placeable")
 	}
 }
 

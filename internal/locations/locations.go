@@ -7,20 +7,19 @@
 // locations service. Which one is read is selected per deployment by Source,
 // so a control plane that has not been migrated keeps reading the types it
 // already has.
-//
-// Placement can also be read from the service catalog: a ServiceAvailability
-// records that a service is deployed and operational at a Location, which is
-// the fact "may this project place compute here?" actually rests on.
 package locations
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +29,11 @@ import (
 	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
 
+// ComputeServiceName is the name the platform records compute availability
+// under: a ServiceAvailability whose spec.serviceRef.name is this value says
+// compute is deployed and validated at spec.locationRef.name.
+const ComputeServiceName = "compute"
+
 const (
 	// TopologyCityCodeKey is the topology key holding a location's city.
 	TopologyCityCodeKey = locationsv1alpha1.TopologyCityCodeKey
@@ -37,16 +41,6 @@ const (
 	// ServingLocationTopologyLabel is the cluster label a cell carries to claim
 	// the location it serves.
 	ServingLocationTopologyLabel = locationsv1alpha1.ServingLocationTopologyLabel
-
-	// DefaultServiceName is the service whose availability records name the
-	// locations a project may place at. Compute reads its own.
-	DefaultServiceName = "compute"
-
-	// conditionAvailable is the ServiceAvailability condition that reports the
-	// service deployed and validated at the location. The service catalog keeps
-	// the constant inside its controller package, so the string is repeated
-	// here rather than importing an internal package.
-	conditionAvailable = "Available"
 )
 
 // Source names the API group locations are read from.
@@ -60,15 +54,6 @@ const (
 	// SourceLocations reads locations.miloapis.com Locations and
 	// ServingLocations, served by the locations service.
 	SourceLocations Source = "Locations"
-
-	// SourceServiceAvailability reads services.miloapis.com
-	// ServiceAvailability records: a location is placeable when the service
-	// reports itself available there. The topology still comes from the
-	// locations.miloapis.com Location each record points at, so this source
-	// reads both kinds. Serving locations are unaffected — availability is a
-	// statement about a location, not about a cell — and are read from the
-	// locations service.
-	SourceServiceAvailability Source = "ServiceAvailability"
 )
 
 // Resolve reports which source to read. An unset source reads network
@@ -79,32 +64,35 @@ func (s Source) Resolve() (Source, error) {
 		return SourceNetworkServices, nil
 	case SourceLocations:
 		return SourceLocations, nil
-	case SourceServiceAvailability:
-		return SourceServiceAvailability, nil
 	default:
-		return "", fmt.Errorf("unknown location source %q, want %q, %q or %q",
-			s, SourceNetworkServices, SourceLocations, SourceServiceAvailability)
+		return "", fmt.Errorf("unknown location source %q, want %q or %q", s, SourceNetworkServices, SourceLocations)
 	}
 }
-
-// ErrAvailabilityNotServed reports that a project does not serve one of the two
-// kinds SourceServiceAvailability reads, so where compute is offered cannot be
-// answered at all.
-//
-// This does NOT degrade to no locations, where the other sources do. An empty
-// list is a real answer — compute is offered nowhere this project may use —
-// and returning it for a kind nobody is serving tells a customer their project
-// has no locations when the truth is that nothing looked. The two are opposite
-// actions: one waits for Datum to add a location, the other is a deployment
-// that needs fixing, so they must never arrive as the same answer.
-//
-// Wrapped with the kind that was missing, and matched with errors.Is.
-var ErrAvailabilityNotServed = errors.New("where compute is offered cannot be read from this project")
 
 // PlacementLocation is a location a project may place workloads at.
 type PlacementLocation struct {
 	Name     string
 	Topology map[string]string
+
+	// Ready reports whether the location itself is serving. A Location read
+	// from the locations service is Ready when its Ready condition is true. A
+	// LocationBinding carries no readiness contract that compute reads, so
+	// every binding is Ready.
+	Ready bool
+
+	// ServiceAvailable reports whether compute is deployed and validated at
+	// the location, read from the ServiceAvailability the platform mirrors
+	// into the project. A location can be Ready for the platform generally
+	// yet have no compute cell behind it; this is what tells the two apart.
+	// A control plane that does not serve the kind enforces no such gate, so
+	// every location there is available.
+	ServiceAvailable bool
+}
+
+// Placeable reports whether a placement may run at the location: it is Ready
+// and compute is available there.
+func (l PlacementLocation) Placeable() bool {
+	return l.Ready && l.ServiceAvailable
 }
 
 // CityCode returns the city the location serves, and whether it declares one.
@@ -125,26 +113,14 @@ func (l ServingLocation) CityCode() string {
 }
 
 // ListPlacementLocations returns the locations a project may place workloads
-// at, read from the project's control plane. Availability records are read for
-// DefaultServiceName; ListPlacementLocationsForService names another service.
+// at, read from the project's control plane.
 func ListPlacementLocations(ctx context.Context, c client.Client, source Source) ([]PlacementLocation, error) {
-	return ListPlacementLocationsForService(ctx, c, source, DefaultServiceName)
-}
-
-// ListPlacementLocationsForService is ListPlacementLocations for a named
-// service. The name is only read by SourceServiceAvailability, which is the
-// only source that knows which service a location is offered for; the other
-// two sources have already been filtered to one service by whoever wrote them.
-func ListPlacementLocationsForService(
-	ctx context.Context, c client.Client, source Source, serviceName string,
-) ([]PlacementLocation, error) {
 	resolved, err := source.Resolve()
 	if err != nil {
 		return nil, err
 	}
 
-	switch resolved {
-	case SourceNetworkServices:
+	if resolved == SourceNetworkServices {
 		var bindings networkingv1alpha.LocationBindingList
 		if err := c.List(ctx, &bindings); err != nil {
 			return nil, fmt.Errorf("failed to list location bindings: %w", err)
@@ -155,12 +131,10 @@ func ListPlacementLocationsForService(
 			found = append(found, PlacementLocation{
 				Name:     binding.Name,
 				Topology: binding.Spec.Topology,
+				Ready:    true,
 			})
 		}
-		return found, nil
-
-	case SourceServiceAvailability:
-		return listAvailableLocations(ctx, c, serviceName)
+		return markServiceAvailability(ctx, c, found)
 	}
 
 	var list locationsv1alpha1.LocationList
@@ -176,68 +150,127 @@ func ListPlacementLocationsForService(
 		found = append(found, PlacementLocation{
 			Name:     location.Name,
 			Topology: location.Spec.Topology,
+			Ready:    apimeta.IsStatusConditionTrue(location.Status.Conditions, locationsv1alpha1.LocationConditionReady),
 		})
+	}
+	return markServiceAvailability(ctx, c, found)
+}
+
+// markServiceAvailability sets ServiceAvailable on each location from the
+// ServiceAvailability records the platform mirrors into the project.
+//
+// A location is available when a record for the compute service names it and
+// reports Available. A control plane that does not serve the kind has no
+// availability to consult, so every location is marked available and the
+// Ready gate alone decides, which is what placement did before the platform
+// began mirroring availability.
+func markServiceAvailability(ctx context.Context, c client.Client, found []PlacementLocation) ([]PlacementLocation, error) {
+	available, enforced, err := AvailableLocations(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	for i := range found {
+		found[i].ServiceAvailable = !enforced || available.Has(found[i].Name)
 	}
 	return found, nil
 }
 
-// listAvailableLocations returns the locations serviceName reports itself
-// available at, with the topology of the Location each record names.
-//
-// A control plane serves availability records for every service, so filtering
-// on the service is what makes the answer compute's rather than the platform's.
-//
-// The Locations are listed once and indexed rather than fetched one at a time:
-// a record per service per location makes the per-record read the expensive
-// shape. A record naming a Location that is not there is skipped, not failed —
-// the two objects are written by different services, and a project that can
-// read one but not the other must still see the locations it can. A KIND that
-// is not served is the opposite case and fails: see ErrAvailabilityNotServed.
-func listAvailableLocations(ctx context.Context, c client.Client, serviceName string) ([]PlacementLocation, error) {
-	var availability servicesv1alpha1.ServiceAvailabilityList
-	if err := c.List(ctx, &availability); err != nil {
+// AvailableLocations returns the names of the locations where compute is
+// available, and whether the control plane serves availability at all. When
+// it does not, enforced is false and the set is empty.
+func AvailableLocations(ctx context.Context, c client.Client) (available sets.Set[string], enforced bool, err error) {
+	var list servicesv1alpha1.ServiceAvailabilityList
+	if err := c.List(ctx, &list); err != nil {
 		if kindNotInstalled(err) {
-			return nil, fmt.Errorf("%w: %s is not served here: %w",
-				ErrAvailabilityNotServed, "ServiceAvailability", err)
+			return sets.Set[string]{}, false, nil
 		}
-		return nil, fmt.Errorf("failed to list service availability: %w", err)
+		return nil, false, fmt.Errorf("failed to list service availabilities: %w", err)
+	}
+
+	available = sets.Set[string]{}
+	for _, availability := range list.Items {
+		if availability.Spec.ServiceRef.Name != ComputeServiceName {
+			continue
+		}
+		if apimeta.IsStatusConditionTrue(availability.Status.Conditions, "Available") {
+			available.Insert(availability.Spec.LocationRef.Name)
+		}
+	}
+	return available, true, nil
+}
+
+// ErrAvailabilityNotServed reports that a project does not serve one of the two
+// kinds ListAvailableLocations reads, so where compute is offered cannot be
+// answered at all.
+//
+// This does NOT degrade to no locations, where placement reads do. An empty
+// list is a real answer — compute is offered nowhere this project may use —
+// and returning it for a kind nobody is serving tells a customer their project
+// has no locations when the truth is that nothing looked. The two call for
+// opposite actions: one waits for Datum to add a location, the other is a
+// deployment that needs fixing, so they must never arrive as the same answer.
+//
+// Wrapped with the kind that was missing, and matched with errors.Is.
+var ErrAvailabilityNotServed = errors.New("where compute is offered cannot be read from this project")
+
+// ListAvailableLocations returns the locations where compute is offered and
+// this project may use it, read only from the ServiceAvailability records the
+// platform mirrors into the project and the Locations they name.
+//
+// There is no choice of source here, deliberately. ListPlacementLocations
+// serves the manager, which reads whichever kinds its deployment was migrated
+// to and treats a control plane that serves no availability as one that
+// enforces none. This answers a customer instead, and a customer asking where
+// they may deploy must be told the same thing wherever they ask, or refused —
+// hence ErrAvailabilityNotServed rather than the permissive fallback.
+func ListAvailableLocations(ctx context.Context, c client.Client) ([]PlacementLocation, error) {
+	available, enforced, err := AvailableLocations(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if !enforced {
+		return nil, fmt.Errorf("%w: %s is not served here", ErrAvailabilityNotServed, "ServiceAvailability")
 	}
 
 	var list locationsv1alpha1.LocationList
 	if err := c.List(ctx, &list); err != nil {
 		if kindNotInstalled(err) {
-			return nil, fmt.Errorf("%w: %s is not served here: %w",
-				ErrAvailabilityNotServed, "Location", err)
+			return nil, fmt.Errorf("%w: %s is not served here: %w", ErrAvailabilityNotServed, "Location", err)
 		}
 		return nil, fmt.Errorf("failed to list locations: %w", err)
 	}
 
-	byName := make(map[string]*locationsv1alpha1.Location, len(list.Items))
+	// A record naming a Location that is not there is skipped, not failed: the
+	// two objects are written by different services, and a project that can
+	// read one but not the other must still see the locations it can.
+	found := make([]PlacementLocation, 0, available.Len())
 	for i := range list.Items {
-		byName[list.Items[i].Name] = &list.Items[i]
-	}
-
-	found := make([]PlacementLocation, 0, len(availability.Items))
-	seen := sets.Set[string]{}
-	for i := range availability.Items {
-		record := &availability.Items[i]
-		if record.Spec.ServiceRef.Name != serviceName {
+		location := &list.Items[i]
+		if !available.Has(location.Name) {
 			continue
 		}
-		if !apimeta.IsStatusConditionTrue(record.Status.Conditions, conditionAvailable) {
-			continue
-		}
-		location, ok := byName[record.Spec.LocationRef.Name]
-		if !ok || seen.Has(location.Name) {
-			continue
-		}
-		seen.Insert(location.Name)
 		found = append(found, PlacementLocation{
 			Name:     location.Name,
 			Topology: location.Spec.Topology,
+			Ready: apimeta.IsStatusConditionTrue(
+				location.Status.Conditions, locationsv1alpha1.LocationConditionReady),
+			ServiceAvailable: true,
 		})
 	}
+	sort.Slice(found, func(i, j int) bool { return found[i].Name < found[j].Name })
 	return found, nil
+}
+
+// ServiceAvailabilityGVK returns the kind a controller watches to learn that
+// compute availability at a location changed.
+func ServiceAvailabilityGVK() schema.GroupVersionKind {
+	return servicesv1alpha1.GroupVersion.WithKind("ServiceAvailability")
+}
+
+// ServesServiceAvailabilityKind reports whether the control plane serves
+// ServiceAvailability, so a watch on it is safe to register.
+func ServesServiceAvailabilityKind(mapper apimeta.RESTMapper) (bool, error) {
+	return servesKind(mapper, ServiceAvailabilityGVK())
 }
 
 // ListServingLocations returns the locations delivered to a cell.
@@ -281,9 +314,92 @@ func ListServingLocations(ctx context.Context, c client.Client, source Source) (
 	return found, nil
 }
 
+// Select returns the Ready locations whose topology matches the selector,
+// sorted by name so callers derive a stable set of deployments from it.
+//
+// An empty selector is an error rather than a match for every location. The
+// webhook rejects one, so reaching this with one means the stored object was
+// not admitted through it.
+func Select(found []PlacementLocation, selector *metav1.LabelSelector) ([]PlacementLocation, error) {
+	if selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0) {
+		return nil, errors.New("location selector is empty")
+	}
+
+	sel, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid location selector: %w", err)
+	}
+
+	var matched []PlacementLocation
+	for _, location := range found {
+		if location.Placeable() && sel.Matches(labels.Set(location.Topology)) {
+			matched = append(matched, location)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Name < matched[j].Name })
+	return matched, nil
+}
+
+// PlacementLocationObject returns the object a controller watches to learn
+// that the locations a project may place workloads at have changed.
+func PlacementLocationObject(source Source) (client.Object, error) {
+	resolved, err := source.Resolve()
+	if err != nil {
+		return nil, err
+	}
+
+	if resolved == SourceNetworkServices {
+		return &networkingv1alpha.LocationBinding{}, nil
+	}
+	return &locationsv1alpha1.Location{}, nil
+}
+
+// PlacementLocationGVK returns the kind a controller watches to learn that the
+// locations a project may place workloads at have changed.
+func PlacementLocationGVK(source Source) (schema.GroupVersionKind, error) {
+	resolved, err := source.Resolve()
+	if err != nil {
+		return schema.GroupVersionKind{}, err
+	}
+
+	if resolved == SourceNetworkServices {
+		return networkingv1alpha.GroupVersion.WithKind("LocationBinding"), nil
+	}
+	return locationsv1alpha1.GroupVersion.WithKind("Location"), nil
+}
+
+// ServesPlacementLocationKind reports whether the control plane behind the
+// mapper serves the kind the source watches for placement locations.
+//
+// Unlike EnsureServingLocationKind this answers rather than refuses. A cell
+// serves the deployments it is asked about, so a missing serving location kind
+// there is a misconfiguration worth failing on. Placement locations are read
+// from many project control planes engaged one at a time, and a control plane
+// that does not carry the kind is skipped rather than taking the whole manager
+// down with it.
+func ServesPlacementLocationKind(mapper apimeta.RESTMapper, source Source) (bool, error) {
+	gvk, err := PlacementLocationGVK(source)
+	if err != nil {
+		return false, err
+	}
+	return servesKind(mapper, gvk)
+}
+
+// servesKind reports whether the control plane behind the mapper serves the
+// kind. A kind that is not installed reads as not served; any other mapper
+// failure is returned, since it says nothing about the kind.
+func servesKind(mapper apimeta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
+	if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		if kindNotInstalled(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to determine whether %s is served: %w", gvk, err)
+	}
+	return true, nil
+}
+
 // ServingLocationObject returns the object a controller watches to learn that
-// a cell has been told where it sits. Availability records say nothing about
-// cells, so that source watches the locations service's kind.
+// a cell has been told where it sits.
 func ServingLocationObject(source Source) (client.Object, error) {
 	resolved, err := source.Resolve()
 	if err != nil {
@@ -343,14 +459,23 @@ func crdName(gvk schema.GroupVersionKind) string {
 	return fmt.Sprintf("%ss.%s", strings.ToLower(gvk.Kind), gvk.Group)
 }
 
-// otherSource names a source that watches a different ServingLocation kind, so
-// the error can suggest one worth trying. Only network services serves its own
-// kind; every other source reads the locations service's.
 func otherSource(source Source) Source {
-	if source == SourceNetworkServices {
-		return SourceLocations
+	if source == SourceLocations {
+		return SourceNetworkServices
 	}
-	return SourceNetworkServices
+	return SourceLocations
+}
+
+// PlaceableNames returns the names of the given locations a placement may run
+// at: those that are Ready and where compute is available.
+func PlaceableNames(found []PlacementLocation) sets.Set[string] {
+	names := sets.Set[string]{}
+	for _, location := range found {
+		if location.Placeable() {
+			names.Insert(location.Name)
+		}
+	}
+	return names
 }
 
 // CityCodes returns the cities the given locations serve.

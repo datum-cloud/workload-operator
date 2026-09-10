@@ -34,7 +34,7 @@ different answer:
 | Check | Tool | If it fails |
 |---|---|---|
 | Compute is enabled for the project | `compute_locations_list` | Nothing can be placed. Datum's to enable — the user runs `datumctl compute access request`, and approval is a manual step on Datum's side. |
-| Somewhere to run it | `compute_locations_list` | The city codes it returns are the only ones a placement may name; they come from compute's own availability records, so a city missing from the list is one compute is not offered in. An empty list means nothing is available to this project yet; that is Datum's, not something the user can add. |
+| Somewhere to run it | `compute_locations_list` | The location names it returns are the only ones a placement may name; they come from compute's own availability records, so a location missing from the list is one compute is not offered in. An empty list means nothing is available to this project yet; that is Datum's, not something the user can add. |
 | A network | `compute_networks_list` | `default` by convention. If it is missing, `compute_workload_plan` says so and `compute_workload_apply` creates it alongside the workload — say so when you show the plan, because it is a second object being created. |
 | Quota | `compute_quota_get` | Quota is granted by Datum and cannot be self-served. A project with none can still create a workload; its instances then sit at `QuotaGranted=False` with `QuotaNoBudget` and never start. |
 
@@ -80,8 +80,19 @@ Ask for what is missing rather than inventing it. `compute_workload_render` take
 - **name** — a DNS label (lowercase letters, digits and `-`). It is the object's
   name and cannot be changed later.
 - **image** — fully qualified, per above.
-- **placements** — one or more city codes from `compute_locations_list`, and the
-  replica count for each. Group cities that scale together into one placement.
+- **placements** — where the instances run, and how many. A placement says
+  where in exactly one of two ways:
+  - **`locations`** — location names, taken verbatim from
+    `compute_locations_list`. Use this when the user named specific places. A
+    name that is not in that list can never be satisfied, so never invent one
+    and never pass a city code here.
+  - **`locationSelector`** — a selector over the topology
+    `compute_locations_list` reports for each location, such as
+    `topology.datum.net/city-code: DFW`. This is how you say "every location in
+    Dallas" or "every location in a region" without naming them, and it picks
+    up locations added later on its own.
+
+  Group locations that scale together into one placement.
 - **replicas** — `minReplicas` must be at least 1. There is no scaling from
   zero, and the ceiling is 1000.
 - **port** — optional, and named. A port is how anything reaches the workload;
@@ -136,7 +147,15 @@ this list before you validate.
    for everything one workload references put together. Over either and the
    workload reports `SourceTooLarge` rather than failing at create.
 
-8. **Editing a ConfigMap does not restart anything.** The new contents reach the
+8. **A port is not a public URL.** `ports` plus the ingress rule the render
+   emits makes the port reachable on the instance's own address — that is the
+   whole of what this path does. A managed public HTTPS URL in front of an HTTP
+   workload is published separately, and today the only way to get one is
+   `datumctl compute deploy --http-port`, which these tools cannot do. Say that
+   plainly when the user asks for a URL: they will get an address and a port,
+   not a hostname, unless they run that command themselves.
+
+9. **Editing a ConfigMap does not restart anything.** The new contents reach the
    machines, but a process that read the file at startup goes on running with
    what it read. Say this whenever a config change is the point of the
    conversation — the user has to restart the workload themselves, and there is
@@ -181,8 +200,8 @@ catch.
 ## What to do when a step fails
 
 - **Render is missing something** — an input you did not gather. Ask for it by
-  name. Do not fill it in with a plausible default; a guessed port or city is a
-  workload that runs in the wrong place.
+  name. Do not fill it in with a plausible default; a guessed port or location
+  is a workload that runs in the wrong place.
 
 - **Validate rejects it** — this is the server's own answer, in its own words,
   and it names the exact field. Quote the field path verbatim and translate the
@@ -216,8 +235,10 @@ workload is one command, and these are theirs to run, not yours to assume:
     datumctl compute access request
     datumctl compute build --push --output ghcr.io/acme/api:1.4.2 .
     datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --city=DFW --min=1 --port=8080
+    datumctl compute deploy api --image=ghcr.io/acme/api:1.4.2 --city=DFW --http-port=8080
 
-Offer them when a step above has no tool behind it — the access request has
+The last one is the only way to get a public HTTPS URL, per trap 8. Offer them
+when a step above has no tool behind it — the access request and the URL have
 none at all — and otherwise stay with the tools, which is the path that shows
 the user the manifest before anything is created.
 
@@ -226,8 +247,8 @@ the user the manifest before anything is created.
 Say what will exist, where, and how many, in the user's own words first: "one
 container running `ghcr.io/acme/api:1.4.2` in Dallas, two replicas, answering on
 port 8080". Then the identifiers — the workload name, the image with its tag,
-the city codes — because those are what they need to check it themselves or to
-escalate.
+the location names — because those are what they need to check it themselves or
+to escalate.
 
 After apply, say plainly that the workload was created and that it is not
 running yet, and what you will look at next. A create reported as a deploy is

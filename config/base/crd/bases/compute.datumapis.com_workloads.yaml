@@ -72,10 +72,84 @@ spec:
                 items:
                   properties:
                     cityCodes:
-                      description: A list of city codes that define where the instances
-                        should be deployed.
+                      description: |-
+                        The city codes this placement was written against before placement
+                        moved to locations. This field is deprecated and kept only so workloads
+                        stored before that change keep running: admission and the workload
+                        controller rewrite it into a locationSelector on
+                        topology.datum.net/city-code, which places at every location in those
+                        cities, and clear it. New workloads set locations or locationSelector
+                        instead.
                       items:
                         type: string
+                      minItems: 1
+                      type: array
+                    locationSelector:
+                      description: |-
+                        A selector over the topology of the locations available to the project,
+                        such as topology.datum.net/city-code or topology.datum.net/region. Every
+                        Ready location whose topology matches receives a deployment, and the set
+                        is re-evaluated as locations are added, removed, or change readiness. An
+                        empty selector is rejected rather than treated as matching every
+                        location. Exactly one of locations or locationSelector must be set.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    locations:
+                      description: |-
+                        The locations where the instances should be deployed, by name. Use this
+                        to pin a placement to specific locations. Exactly one of locations or
+                        locationSelector must be set.
+                      items:
+                        properties:
+                          name:
+                            description: Name of a datum location
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      minItems: 1
                       type: array
                     name:
                       description: The name of the placement
@@ -148,10 +222,14 @@ spec:
                       - minReplicas
                       type: object
                   required:
-                  - cityCodes
                   - name
                   - scaleSettings
                   type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of locations, locationSelector, or cityCodes
+                      must be set
+                    rule: '(has(self.locations) ? 1 : 0) + (has(self.locationSelector)
+                      ? 1 : 0) + (has(self.cityCodes) ? 1 : 0) == 1'
                 minItems: 1
                 type: array
               template:
@@ -461,6 +539,21 @@ spec:
                         description: The runtime type of the instance, such as a container
                           sandbox or a VM.
                         properties:
+                          class:
+                            description: |-
+                              The execution tier the instance runs in. The value names a RuntimeClass
+                              in the platform catalog, which Datum publishes and customers do not
+                              define. Publishing a new tier adds a class instead of changing this API.
+
+                              The class is independent of the runtime shape above. Either a sandbox or
+                              a virtual machine can run in any class the platform offers.
+
+                              An empty value selects the class the catalog marks as default. Admission
+                              records that choice on the workload and never resolves it again, so an
+                              existing workload keeps the tier, cost, and startup characteristics it
+                              was created with.
+                            maxLength: 253
+                            type: string
                           resources:
                             description: |-
                               Resources each instance must be allocated.
@@ -1689,6 +1782,19 @@ spec:
                       description: The desired number of instances
                       format: int32
                       type: integer
+                    locations:
+                      description: |-
+                        The locations the placement currently resolves to: the Ready locations
+                        it names, or every Ready location its selector matches.
+                      items:
+                        properties:
+                          name:
+                            description: Name of a datum location
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type: array
                     name:
                       description: The name of the placement
                       type: string

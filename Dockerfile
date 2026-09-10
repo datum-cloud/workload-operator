@@ -30,6 +30,7 @@ COPY cmd/main.go cmd/main.go
 COPY cmd/compute-mcp/ cmd/compute-mcp/
 COPY api/ api/
 COPY internal/ internal/
+COPY pkg/ pkg/
 COPY docs/agent/ docs/agent/
 
 # Build

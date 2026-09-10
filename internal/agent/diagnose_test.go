@@ -205,7 +205,7 @@ func TestDiagnosePlatformFaultTellsCustomerNotToChangeSpec(t *testing.T) {
 	deps := []computev1alpha.WorkloadDeployment{
 		deployment("edge-cache-ams",
 			cond(computev1alpha.WorkloadDeploymentAvailable, "False",
-				computev1alpha.WorkloadDeploymentReasonCityCodeMismatch, "Deployment asked for AMS; cell serves LHR.")),
+				computev1alpha.WorkloadDeploymentReasonLocationMismatch, "Deployment asked for loc-ams-1; cell serves loc-lhr-1.")),
 	}
 
 	d := Diagnose(w, deps, nil)

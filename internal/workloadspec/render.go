@@ -65,6 +65,7 @@ import (
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
 const (
@@ -129,6 +130,13 @@ type Input struct {
 	// DefaultInstanceType.
 	InstanceType string
 
+	// RuntimeClass names the execution tier the instances run in. Passed
+	// through verbatim and left empty when unset, so the server picks the
+	// class its catalog marks as default. Nothing is defaulted here: the
+	// catalog is served, this package is pure, and guessing a class would
+	// settle a choice that cannot be changed after the workload exists.
+	RuntimeClass string
+
 	// Network is the name of the network the instance's single interface
 	// attaches to. Defaults to DefaultNetwork.
 	Network string
@@ -165,16 +173,24 @@ type Input struct {
 	VM *VMInput
 }
 
-// Placement is one group of city codes scaled together.
+// Placement is one group of locations scaled together. Exactly one of
+// Locations or LocationSelector must be set.
 type Placement struct {
 	// Name of the placement. Must be a DNS label. Defaults to
 	// DefaultPlacementName.
 	Name string
 
-	// CityCodes the placement deploys to, such as DFW. At least one is
-	// required. The set of valid codes is owned by the platform and is not
-	// checked here.
-	CityCodes []string
+	// Locations the placement deploys to, by name, such as "us-south-dfw-1".
+	// Each named location receives the placement's replicas. The set of valid
+	// names is owned by the platform and is not checked here — only that the
+	// names are well formed and distinct.
+	Locations []string
+
+	// LocationSelector places at every location whose topology matches, such
+	// as every location in a city or a region. It is re-evaluated as locations
+	// are added and removed, where Locations is a fixed list. An empty
+	// selector is rejected rather than read as matching everything.
+	LocationSelector *metav1.LabelSelector
 
 	// MinReplicas is the number of instances per placement. Defaults to
 	// DefaultMinReplicas; must not exceed 1000.
@@ -244,7 +260,7 @@ type VMInput struct {
 // Defaults returns an Input pre-filled with the values the CLI advertises: the
 // default instance type and network, and a single placement named "default"
 // with one replica. The caller still has to supply Name, Image, and the
-// placement's CityCodes.
+// placement's Locations or LocationSelector.
 func Defaults() Input {
 	return Input{
 		InstanceType: DefaultInstanceType,
@@ -378,6 +394,7 @@ func buildTemplate(in Input, volumes []plannedVolume) computev1alpha.InstanceTem
 				Resources: computev1alpha.InstanceRuntimeResources{
 					InstanceType: in.InstanceType,
 				},
+				Class: in.RuntimeClass,
 			},
 			NetworkInterfaces: []computev1alpha.InstanceNetworkInterface{
 				buildNetworkInterface(in),
@@ -525,9 +542,22 @@ func buildEnv(env []EnvVar) []corev1.EnvVar {
 func buildPlacements(placements []Placement) []computev1alpha.WorkloadPlacement {
 	out := make([]computev1alpha.WorkloadPlacement, 0, len(placements))
 	for _, p := range placements {
+		// Exactly one of the two is emitted: the API rejects a placement
+		// carrying both, and validate has already refused an input with both.
+		var refs []locationsv1alpha1.LocationReference
+		selector := p.LocationSelector
+		if len(p.Locations) > 0 {
+			refs = make([]locationsv1alpha1.LocationReference, 0, len(p.Locations))
+			for _, name := range p.Locations {
+				refs = append(refs, locationsv1alpha1.LocationReference{Name: name})
+			}
+			selector = nil
+		}
+
 		out = append(out, computev1alpha.WorkloadPlacement{
-			Name:      p.Name,
-			CityCodes: p.CityCodes,
+			Name:             p.Name,
+			Locations:        refs,
+			LocationSelector: selector.DeepCopy(),
 			ScaleSettings: computev1alpha.HorizontalScaleSettings{
 				MinReplicas: p.MinReplicas,
 				// maxReplicas is left unset: it requires scaling metrics, which
@@ -754,10 +784,7 @@ func validatePlacements(placements []Placement) field.ErrorList {
 			names.Insert(p.Name)
 		}
 
-		if len(p.CityCodes) == 0 {
-			allErrs = append(allErrs, field.Required(path.Child("cityCodes"),
-				"at least one city code is required"))
-		}
+		allErrs = append(allErrs, validatePlacementLocations(p, path)...)
 
 		minPath := path.Child("minReplicas")
 		if p.MinReplicas < 0 {
@@ -767,6 +794,52 @@ func validatePlacements(placements []Placement) field.ErrorList {
 		}
 	}
 
+	return allErrs
+}
+
+// validatePlacementLocations enforces the API's "exactly one of locations or
+// locationSelector" rule at the input level, where the caller can still act on
+// it, and refuses an empty selector for the same reason the API does: it is
+// not read as matching every location.
+func validatePlacementLocations(p Placement, path *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	locationsPath := path.Child("locations")
+	selectorPath := path.Child("locationSelector")
+
+	switch {
+	case len(p.Locations) == 0 && p.LocationSelector == nil:
+		return append(allErrs, field.Required(locationsPath,
+			"name at least one location, or set locationSelector to place at every location matching a topology"))
+	case len(p.Locations) > 0 && p.LocationSelector != nil:
+		return append(allErrs, field.Forbidden(selectorPath,
+			"may not be set together with locations; name locations or select them, not both"))
+	case p.LocationSelector != nil:
+		if len(p.LocationSelector.MatchLabels) == 0 && len(p.LocationSelector.MatchExpressions) == 0 {
+			return append(allErrs, field.Required(selectorPath,
+				"an empty selector is not read as matching every location; select at least one topology key, such as "+
+					locationsv1alpha1.TopologyCityCodeKey))
+		}
+		if _, err := metav1.LabelSelectorAsSelector(p.LocationSelector); err != nil {
+			allErrs = append(allErrs, field.Invalid(selectorPath, p.LocationSelector, err.Error()))
+		}
+		return allErrs
+	}
+
+	seen := sets.Set[string]{}
+	for i, name := range p.Locations {
+		namePath := locationsPath.Index(i)
+		if name == "" {
+			allErrs = append(allErrs, field.Required(namePath, "a location name is required"))
+			continue
+		}
+		for _, msg := range apimachineryvalidation.NameIsDNSSubdomain(name, false) {
+			allErrs = append(allErrs, field.Invalid(namePath, name, msg))
+		}
+		if seen.Has(name) {
+			allErrs = append(allErrs, field.Duplicate(namePath, name))
+		}
+		seen.Insert(name)
+	}
 	return allErrs
 }
 

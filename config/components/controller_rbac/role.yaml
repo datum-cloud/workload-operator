@@ -70,6 +70,14 @@ rules:
   - patch
   - update
 - apiGroups:
+  - compute.datumapis.com
+  resources:
+  - runtimeclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - events.k8s.io
   resources:
   - events
@@ -88,6 +96,17 @@ rules:
 - apiGroups:
   - networking.datumapis.com
   resources:
+  - locationbindings
+  - networkinterfaces
+  - networks
+  - servinglocations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.datumapis.com
+  resources:
   - networkinterfaceclaims
   verbs:
   - create
@@ -96,16 +115,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - networking.datumapis.com
-  resources:
-  - networkinterfaces
-  - networks
-  - servinglocations
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - networking.datumapis.com
@@ -128,6 +137,7 @@ rules:
 - apiGroups:
   - services.miloapis.com
   resources:
+  - serviceavailabilities
   - serviceconsumers
   - services
   verbs:

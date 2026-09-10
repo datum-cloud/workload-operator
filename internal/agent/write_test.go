@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	computev1alpha "go.datum.net/compute/api/v1alpha"
+	"go.datum.net/compute/internal/locations"
 	"go.datum.net/compute/internal/workloadspec"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 )
@@ -156,7 +157,7 @@ func existingWorkload(image, resourceVersion string) *computev1alpha.Workload {
 		Name:  wlAPIBackend,
 		Image: image,
 		Placements: []workloadspec.Placement{
-			{CityCodes: []string{cityDFW}, MinReplicas: 1},
+			{Locations: []string{locationDFW}, MinReplicas: 1},
 		},
 	})
 	if err != nil {
@@ -183,12 +184,12 @@ func writeDepsFor(project string, r Reader, w Writer) DepsFor {
 	}
 }
 
-// renderInput is the everyday case: one container, one city, one port.
+// renderInput is the everyday case: one container, one location, one port.
 func renderInput() WorkloadRenderInput {
 	return WorkloadRenderInput{
 		Name:       wlAPIBackend,
 		Image:      testImage,
-		Placements: []RenderPlacement{{CityCodes: []string{cityDFW}, MinReplicas: 2}},
+		Placements: []RenderPlacement{{Locations: []string{locationDFW}, MinReplicas: 2}},
 		Ports:      []RenderPort{{Name: "http", Port: 8080}},
 	}
 }
@@ -252,7 +253,7 @@ func TestWorkloadRenderProducesAManifestAndSaysWhatIsSettled(t *testing.T) {
 		"name: " + wlAPIBackend,
 		testImage,
 		"minReplicas: 2",
-		"- " + cityDFW,
+		"- name: " + locationDFW,
 	} {
 		if !strings.Contains(out.Manifest, want) {
 			t.Errorf("manifest is missing %q:\n%s", want, out.Manifest)
@@ -283,6 +284,64 @@ func TestWorkloadRenderProducesAManifestAndSaysWhatIsSettled(t *testing.T) {
 // TestWorkloadRenderReportsAPublicAddressAsFinal: asking for IPv4 fixes the
 // address families for the life of the workload, so the note has to change
 // with the input rather than always saying the same thing.
+// TestWorkloadRenderSelectsLocationsByTopology covers the second way a
+// placement says where: a selector over location topology rather than a list of
+// names. It is the only way to say "every location in this city", and it keeps
+// matching locations added later — which is a standing behaviour the person
+// agreeing to the manifest has to be told about, so the notes carry it.
+func TestWorkloadRenderSelectsLocationsByTopology(t *testing.T) {
+	deps := writeDeps(&writeReader{}, &fakeWriter{})
+	in := renderInput()
+	in.Placements = []RenderPlacement{{
+		LocationSelector: &RenderLocationSelector{
+			MatchLabels: map[string]string{locations.TopologyCityCodeKey: cityDFW},
+		},
+		MinReplicas: 2,
+	}}
+
+	_, out, err := workloadRender(deps)(context.Background(), nil, in)
+	if err != nil {
+		t.Fatalf("compute_workload_render: %v", err)
+	}
+	for _, want := range []string{"locationSelector:", locations.TopologyCityCodeKey + ": " + cityDFW} {
+		if !strings.Contains(out.Manifest, want) {
+			t.Errorf("manifest is missing %q:\n%s", want, out.Manifest)
+		}
+	}
+	if strings.Contains(out.Manifest, "locations:") {
+		t.Errorf("a selector was given, so no location list may be emitted:\n%s", out.Manifest)
+	}
+	if !strings.Contains(strings.Join(out.Notes, "\n"), "locations added later") {
+		t.Errorf("notes do not say the selector keeps matching new locations:\n%s", out.Notes)
+	}
+}
+
+// TestWorkloadRenderPassesTheRuntimeClassThrough: the tier is the server's
+// catalog to own. Whatever the person named goes through verbatim, and naming
+// nothing leaves the field off so the server picks its own default rather than
+// this tool settling a choice that cannot be changed afterwards.
+func TestWorkloadRenderPassesTheRuntimeClassThrough(t *testing.T) {
+	deps := writeDeps(&writeReader{}, &fakeWriter{})
+
+	_, bare, err := workloadRender(deps)(context.Background(), nil, renderInput())
+	if err != nil {
+		t.Fatalf("compute_workload_render: %v", err)
+	}
+	if strings.Contains(bare.Manifest, "class:") {
+		t.Errorf("no runtime class was asked for, so none may be rendered:\n%s", bare.Manifest)
+	}
+
+	in := renderInput()
+	in.RuntimeClass = "datum-sandbox"
+	_, out, err := workloadRender(deps)(context.Background(), nil, in)
+	if err != nil {
+		t.Fatalf("compute_workload_render: %v", err)
+	}
+	if !strings.Contains(out.Manifest, "class: datum-sandbox") {
+		t.Errorf("manifest does not carry the runtime class that was asked for:\n%s", out.Manifest)
+	}
+}
+
 func TestWorkloadRenderReportsAPublicAddressAsFinal(t *testing.T) {
 	deps := writeDeps(&writeReader{}, &fakeWriter{})
 	in := renderInput()
@@ -894,7 +953,7 @@ func TestPlanToApplyOverTheWire(t *testing.T) {
 		"name":  wlAPIBackend,
 		"image": testImage,
 		"placements": []map[string]any{
-			{"cityCodes": []string{cityDFW}, "minReplicas": 2},
+			{"locations": []string{locationDFW}, "minReplicas": 2},
 		},
 	}, &rendered)
 	if rendered.Manifest == "" {

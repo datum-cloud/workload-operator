@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 )
 
@@ -33,8 +35,7 @@ func Diff(existing, desired *computev1alpha.Workload) []string {
 
 		op, ok := oldPlacements[np.Name]
 		if !ok {
-			lines = append(lines, fmt.Sprintf("  + new placement %q: cities=[%s]",
-				np.Name, strings.Join(np.CityCodes, ", ")))
+			lines = append(lines, fmt.Sprintf("  + new placement %q: %s", np.Name, placementWhere(np)))
 			continue
 		}
 
@@ -51,6 +52,26 @@ func Diff(existing, desired *computev1alpha.Workload) []string {
 	}
 
 	return lines
+}
+
+// placementWhere describes where a placement runs, in whichever of the two
+// forms it was written: a fixed list of locations, or a selector over their
+// topology. A selector is shown as the selector, not as the locations it
+// happens to match today, because that is what is being added.
+func placementWhere(p computev1alpha.WorkloadPlacement) string {
+	if p.LocationSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(p.LocationSelector)
+		if err != nil {
+			return "locationSelector=<invalid>"
+		}
+		return "locationSelector=" + selector.String()
+	}
+
+	names := make([]string, 0, len(p.Locations))
+	for _, location := range p.Locations {
+		names = append(names, location.Name)
+	}
+	return fmt.Sprintf("locations=[%s]", strings.Join(names, ", "))
 }
 
 // imageOf returns the first container image found in a workload, or the empty

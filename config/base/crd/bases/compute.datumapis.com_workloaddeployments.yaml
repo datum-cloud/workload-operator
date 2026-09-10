@@ -37,13 +37,8 @@ spec:
     - jsonPath: .status.updatedReplicas
       name: Up-to-date
       type: string
-    - jsonPath: .status.location.namespace
-      name: Location Namespace
-      priority: 1
-      type: string
-    - jsonPath: .status.location.name
-      name: Location Name
-      priority: 1
+    - jsonPath: .spec.locationRef.name
+      name: Location
       type: string
     name: v1alpha
     schema:
@@ -71,10 +66,15 @@ spec:
           spec:
             description: WorkloadDeploymentSpec defines the desired state of WorkloadDeployment
             properties:
-              cityCode:
-                description: deployments can be scheduled in ways other than just
-                  a city code.
-                type: string
+              locationRef:
+                description: The location where this deployment runs.
+                properties:
+                  name:
+                    description: Name of a datum location
+                    type: string
+                required:
+                - name
+                type: object
               placementName:
                 description: The placement in the workload which is driving a deployment
                 type: string
@@ -457,6 +457,21 @@ spec:
                         description: The runtime type of the instance, such as a container
                           sandbox or a VM.
                         properties:
+                          class:
+                            description: |-
+                              The execution tier the instance runs in. The value names a RuntimeClass
+                              in the platform catalog, which Datum publishes and customers do not
+                              define. Publishing a new tier adds a class instead of changing this API.
+
+                              The class is independent of the runtime shape above. Either a sandbox or
+                              a virtual machine can run in any class the platform offers.
+
+                              An empty value selects the class the catalog marks as default. Admission
+                              records that choice on the workload and never resolves it again, so an
+                              existing workload keeps the tier, cost, and startup characteristics it
+                              was created with.
+                            maxLength: 253
+                            type: string
                           resources:
                             description: |-
                               Resources each instance must be allocated.
@@ -1192,7 +1207,7 @@ spec:
                 - uid
                 type: object
             required:
-            - cityCode
+            - locationRef
             - placementName
             - scaleSettings
             - template
@@ -1270,16 +1285,6 @@ spec:
                 description: The desired number of instances
                 format: int32
                 type: integer
-              location:
-                description: The location which the deployment has been scheduled
-                  to
-                properties:
-                  name:
-                    description: Name of a datum location
-                    type: string
-                required:
-                - name
-                type: object
               observedGeneration:
                 description: |-
                   The most recent generation observed by the deployment controller. When

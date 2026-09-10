@@ -33,6 +33,7 @@ import (
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	"go.datum.net/compute/internal/locations"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 
 	"go.datum.net/compute/internal/controller/instancecontrol"
 	instancecontrolstateful "go.datum.net/compute/internal/controller/instancecontrol/stateful"
@@ -145,10 +146,10 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 	// Status().Update call when nothing changed (see loop-prevention comment below).
 	existingStatus := *deployment.Status.DeepCopy()
 
-	// Resolve the cell's location before instances are built: the instance
-	// control strategy stamps Instance.Spec.Location from Status.Location as it
-	// creates them, so resolving afterwards left the first generation of
-	// instances permanently without one.
+	// Verify that federation delivered this deployment to the requested location.
+	// The cell learns where it sits from a ServingLocation, which only reaches
+	// it through the networking integration. Without that integration the cell
+	// cannot contradict the placement, and instances still run.
 	var location servingLocationResult
 	if r.NetworkingEnabled {
 		location, err = r.resolveLocation(ctx, cl.GetClient())
@@ -156,12 +157,6 @@ func (r *WorkloadDeploymentReconciler) Reconcile(ctx context.Context, req mcreco
 			return ctrl.Result{}, fmt.Errorf("failed resolving location: %w", err)
 		}
 		location.evaluate(&deployment)
-
-		// A location the cell contradicts is never written to status: an Instance
-		// carrying the wrong location is worse than one carrying none.
-		if location.reference != nil {
-			deployment.Status.Location = location.reference
-		}
 	}
 
 	// Collect all instances for this deployment
@@ -332,14 +327,11 @@ func (r *WorkloadDeploymentReconciler) reconcileInstanceGates(
 ) (currentReplicas, updatedReplicas, readyReplicas, quotaBlockedReplicas, referencedDataBlockedReplicas int, err error) {
 	templateHash := instancecontrol.ComputeHash(deployment.Spec.Template)
 	for _, instance := range instances {
-		// Instances are stamped with the deployment's location as they are
-		// created, which leaves any instance that predates the cell learning its
-		// own location without one, and nothing else ever revisits it. Backfill
-		// it here. Best-effort by design: a failure is logged and the instance
-		// keeps running, because location has never gated scheduling.
-		if deployment.Status.Location != nil && instance.Spec.Location == nil {
+		// Backfill the canonical desired location on instances created before the
+		// location contract was introduced.
+		if instance.Spec.Location == nil {
 			base := instance.DeepCopy()
-			instance.Spec.Location = deployment.Status.Location
+			instance.Spec.Location = &deployment.Spec.LocationRef
 			if patchErr := c.Patch(ctx, &instance, client.MergeFrom(base)); patchErr != nil {
 				log.FromContext(ctx).Error(patchErr, "failed backfilling instance location", "instance", instance.Name)
 			}
@@ -604,7 +596,7 @@ func selectWDBlockingCondition(
 //	5 - SourceNotFound / SourceTooLarge / SourceUnauthorized (hard spec error)
 //	6 - NetworkNotFound        (hard error; user action required)
 //	7 - NetworkFailedToCreate  (hard infra error)
-//	8 - CityCodeMismatch / AmbiguousServingLocation (the deployment is on a cell
+//	8 - LocationMismatch / AmbiguousServingLocation (the deployment is on a cell
 //	    that cannot serve it; nothing the user does clears it, and no other
 //	    blocker is worth reporting until it is fixed)
 func wdBlockingReasonPriority(reason string) int {
@@ -629,7 +621,7 @@ func wdBlockingReasonPriority(reason string) int {
 		return 6
 	case reasonNetworkFailedToCreate:
 		return 7
-	case computev1alpha.WorkloadDeploymentReasonCityCodeMismatch,
+	case computev1alpha.WorkloadDeploymentReasonLocationMismatch,
 		computev1alpha.WorkloadDeploymentReasonAmbiguousServingLocation:
 		return 8
 	default:
@@ -642,7 +634,7 @@ func wdBlockingReasonPriority(reason string) int {
 type servingLocationResult struct {
 	// reference is the location to stamp on the deployment and its instances. It
 	// is nil whenever the cell's answer is missing or unusable.
-	reference *networkingv1alpha.LocationReference
+	reference *locationsv1alpha1.LocationReference
 
 	// servingLocation is the single ServingLocation the cell was delivered, or
 	// nil when it was delivered none or more than one.
@@ -707,7 +699,7 @@ func (r *WorkloadDeploymentReconciler) resolveLocation(
 	// Location is cluster scoped, so the reference carries a name and no
 	// namespace.
 	return servingLocationResult{
-		reference:       &networkingv1alpha.LocationReference{Name: servingLocation.Name},
+		reference:       &locationsv1alpha1.LocationReference{Name: servingLocation.Name},
 		servingLocation: servingLocation,
 	}, nil
 }
@@ -721,15 +713,15 @@ func (s *servingLocationResult) evaluate(deployment *computev1alpha.WorkloadDepl
 		return
 	}
 
-	cityCode := s.servingLocation.CityCode()
-	if cityCode == deployment.Spec.CityCode {
+	locationName := s.servingLocation.Name
+	if locationName == deployment.Spec.LocationRef.Name {
 		return
 	}
 
 	s.reference = nil
-	s.reason = computev1alpha.WorkloadDeploymentReasonCityCodeMismatch
-	s.message = fmt.Sprintf("Deployment asked for city %q but this cell serves %q; it was delivered to the wrong cell",
-		deployment.Spec.CityCode, cityCode)
+	s.reason = computev1alpha.WorkloadDeploymentReasonLocationMismatch
+	s.message = fmt.Sprintf("Deployment asked for location %q but this cell serves %q; it was delivered to the wrong cell",
+		deployment.Spec.LocationRef.Name, locationName)
 	s.blocked = true
 }
 
@@ -948,7 +940,7 @@ func (r *WorkloadDeploymentReconciler) SetupWithManager(mgr mcmanager.Manager, o
 			// A deployment on a cell that does not yet know its own location waits
 			// without any other wake-up event, and the reconciler does not poll.
 			// Watching ServingLocations re-reconciles those deployments as soon as
-			// the cell learns where it is, so Status.Location is filled in.
+			// the cell learns where it is, so the deployment's location resolves.
 			Watches(servingLocationObject, func(clusterName multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
 				return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []mcreconcile.Request {
 					return enqueueWorkloadDeploymentsForServingLocation(ctx, cl.GetClient(), clusterName)

@@ -15,7 +15,7 @@ import (
 
 	"go.datum.net/compute/internal/locations"
 	"go.datum.net/compute/internal/quotaview"
-	"go.datum.net/compute/internal/validation"
+	"go.datum.net/compute/pkg/instancetype"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 )
 
@@ -80,7 +80,7 @@ func NewClientDiscoverer(c client.Client) *ClientDiscoverer {
 // manager still reads placement per its own configuration; this is the answer a
 // customer is given, and it is the same one wherever they ask.
 func (d *ClientDiscoverer) ListPlacementLocations(ctx context.Context) ([]locations.PlacementLocation, error) {
-	found, err := locations.ListPlacementLocations(ctx, d.Client, locations.SourceServiceAvailability)
+	found, err := locations.ListAvailableLocations(ctx, d.Client)
 	if err != nil {
 		// A project that cannot answer the question at all must not be
 		// reported as a project with nowhere to run: the first is a deployment
@@ -131,8 +131,17 @@ type LocationView struct {
 	DisplayName string `json:"displayName,omitempty"`
 	// Topology is the full set of attributes the location declares, city code
 	// included, so a placement can be matched on more than the city once more
-	// attributes are published.
+	// attributes are published. A locationSelector is matched against exactly
+	// these keys.
 	Topology map[string]string `json:"topology,omitempty"`
+	// Placeable reports whether a placement naming this location will actually
+	// be scheduled: compute is offered here and the location itself is
+	// serving. Every location in this list is one compute is offered at, so a
+	// false here is a location that is not ready yet rather than one the
+	// project may not use.
+	Placeable bool `json:"placeable"`
+	// Ready reports whether the location itself is serving.
+	Ready bool `json:"ready"`
 }
 
 // NetworkView is one network a workload's instances can attach to.
@@ -200,11 +209,13 @@ func RegisterDiscoveryTools(s *mcp.Server, deps DepsFor) {
 		Name:  ToolLocationsList,
 		Title: "List locations",
 		Description: "List the locations where compute is offered and this project can use it, each with " +
-			"its city code (e.g. \"DFW\") and the attributes it declares. The list is derived from " +
-			"compute's own availability records, so it is where compute is actually running, not where " +
-			"it might be: a location missing from this list is one compute is not offered in, and a " +
-			"placement naming it will never come up. Call this before writing a Workload's placements " +
-			"rather than guessing a city. Read-only.",
+			"its name, its city code (e.g. \"DFW\"), the attributes it declares, and whether it is " +
+			"ready to take instances. The list is derived from compute's own availability records, so " +
+			"it is where compute is actually running, not where it might be: a location missing from " +
+			"this list is one compute is not offered in, and a placement naming it will never come up. " +
+			"A placement either names these locations verbatim or selects them by the attributes shown " +
+			"here, which is how to place in every location of a city or a region. Call this before " +
+			"writing a Workload's placements rather than guessing a name. Read-only.",
 	}, locationsList(deps))
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -259,9 +270,11 @@ func locationsList(deps DepsFor) mcp.ToolHandlerFor[LocationsListInput, Location
 		for _, location := range found {
 			code, _ := location.CityCode()
 			out.Locations = append(out.Locations, LocationView{
-				Name:     location.Name,
-				CityCode: code,
-				Topology: location.Topology,
+				Name:      location.Name,
+				CityCode:  code,
+				Topology:  location.Topology,
+				Placeable: location.Placeable(),
+				Ready:     location.Ready,
 			})
 		}
 		// By name, so two calls in one conversation read the same way.
@@ -369,36 +382,19 @@ func (d ToolDeps) discoverer() (Discoverer, error) {
 	return d.Discoverer, nil
 }
 
-// instanceTypeSize is the vCPU and memory one instance type provides.
-type instanceTypeSize struct {
-	// CPUMillicores is thousandths of a vCPU: 1000 is one.
-	CPUMillicores int64
-	MemoryMiB     int64
-}
-
-// instanceTypeSizes gives the size behind each supported instance type name.
-//
-// The names come from internal/validation, which is what actually accepts or
-// rejects a Workload, so this table can never offer a type the API would turn
-// down. The sizes are the platform-declared ones, duplicated here from the
-// instance controller's own accounting table.
-//
-// TODO(#137): both halves belong in one served catalog. Until there is one,
-// a new instance type has to be added in three places — validation, the
-// controller's accounting, and here — and a type missing from this table is
-// reported with no size rather than being silently dropped.
-var instanceTypeSizes = map[string]instanceTypeSize{
-	"datumcloud/d1-standard-2": {CPUMillicores: 1000, MemoryMiB: 2048},
-}
-
 // Catalog returns the instance types a Workload may ask for, in offer order.
-// The first is the default: validation accepts exactly one type today, and the
-// order it lists them in is the order to prefer them.
+// The first is the default: the platform's catalog holds exactly one type
+// today, and the order it lists them in is the order to prefer them.
+//
+// The names and sizes both come from pkg/instancetype, which is the platform's
+// single source for instance sizing — the same table the instance controller
+// claims quota against. Restating either here would let the tool offer a size
+// the API bills differently.
 func Catalog() []InstanceTypeView {
-	supported := validation.SupportedInstanceTypes()
-	out := make([]InstanceTypeView, 0, len(supported))
-	for i, name := range supported {
-		size := instanceTypeSizes[name]
+	names := instancetype.Names()
+	out := make([]InstanceTypeView, 0, len(names))
+	for i, name := range names {
+		size, _ := instancetype.Lookup(name)
 		out = append(out, InstanceTypeView{
 			Name:      name,
 			VCPU:      float64(size.CPUMillicores) / 1000,

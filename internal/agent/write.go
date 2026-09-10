@@ -154,11 +154,30 @@ func (w *ClientWriter) CreateNetwork(ctx context.Context, n *networkingv1alpha.N
 
 // ---------------------------------------------------------------- I/O types
 
-// RenderPlacement is one group of cities scaled together.
+// RenderPlacement is one group of locations scaled together.
 type RenderPlacement struct {
-	Name        string   `json:"name,omitempty" jsonschema:"Placement name, a DNS label. Defaults to \"default\"."`
-	CityCodes   []string `json:"cityCodes" jsonschema:"City codes this placement runs in, e.g. [\"DFW\"]. Only codes compute_locations_list returned can ever be satisfied."`
-	MinReplicas int32    `json:"minReplicas,omitempty" jsonschema:"Instances to run per placement. At least 1 — there is no scaling to zero — and at most 1000. Defaults to 1."`
+	Name string `json:"name,omitempty" jsonschema:"Placement name, a DNS label. Defaults to \"default\"."`
+	// Locations and LocationSelector are the two ways to say where a placement
+	// runs, and exactly one of them must be given. The schema says so rather
+	// than leaving a model to discover it from a rejection.
+	Locations        []string                `json:"locations,omitempty" jsonschema:"Location names this placement runs in, e.g. [\"us-south-dfw-1\"]. Take the names verbatim from compute_locations_list — a name that is not in that list can never be satisfied. Set exactly one of locations or locationSelector."`
+	LocationSelector *RenderLocationSelector `json:"locationSelector,omitempty" jsonschema:"Place at every location whose topology matches, instead of naming them. Use this for \"every location in Dallas\" or \"every location in a region\": match on the topology keys compute_locations_list reports, such as topology.datum.net/city-code. New locations matching it are picked up automatically. Set exactly one of locations or locationSelector."`
+	MinReplicas      int32                   `json:"minReplicas,omitempty" jsonschema:"Instances to run per placement. At least 1 — there is no scaling to zero — and at most 1000. Defaults to 1."`
+}
+
+// RenderLocationSelector is a label selector over location topology, in the
+// two forms the API accepts. An empty selector is refused rather than read as
+// matching every location.
+type RenderLocationSelector struct {
+	MatchLabels      map[string]string           `json:"matchLabels,omitempty" jsonschema:"Topology key/value pairs a location must carry, e.g. {\"topology.datum.net/city-code\": \"DFW\"}."`
+	MatchExpressions []RenderLocationSelectorReq `json:"matchExpressions,omitempty" jsonschema:"Set-based requirements over topology keys, for cases matchLabels cannot express, such as one of several cities."`
+}
+
+// RenderLocationSelectorReq is one set-based requirement.
+type RenderLocationSelectorReq struct {
+	Key      string   `json:"key" jsonschema:"Topology key, e.g. topology.datum.net/city-code."`
+	Operator string   `json:"operator" jsonschema:"In, NotIn, Exists or DoesNotExist."`
+	Values   []string `json:"values,omitempty" jsonschema:"Values for In and NotIn. Must be empty for Exists and DoesNotExist."`
 }
 
 // RenderPort is a named port the workload serves.
@@ -203,6 +222,7 @@ type WorkloadRenderInput struct {
 	Name         string            `json:"name" jsonschema:"Workload name, a DNS label, e.g. \"api-backend\". Cannot be changed later."`
 	Image        string            `json:"image,omitempty" jsonschema:"Fully qualified container image, e.g. \"ghcr.io/acme/api:1.4.2\". Required unless vm is set. A bare name is the most common cause of ImageUnavailable afterwards."`
 	InstanceType string            `json:"instanceType,omitempty" jsonschema:"Instance type from compute_instance_types_list. Defaults to the only one accepted today."`
+	RuntimeClass string            `json:"runtimeClass,omitempty" jsonschema:"Execution tier the instances run in. Leave unset unless the person named one: the server picks its default, and the tier cannot be changed after the workload exists."`
 	Network      string            `json:"network,omitempty" jsonschema:"Network the instance attaches to. Defaults to \"default\"."`
 	Placements   []RenderPlacement `json:"placements" jsonschema:"Where instances run and how many. At least one is required."`
 	Ports        []RenderPort      `json:"ports,omitempty" jsonschema:"Named ports the workload serves. Each is also opened to the internet, since a port nothing can reach is not useful."`
@@ -319,13 +339,15 @@ func RegisterWriteTools(s *mcp.Server, deps DepsFor) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:  ToolWorkloadRender,
 		Title: "Render a workload manifest",
-		Description: "Turn a short description of a deployment — name, image, which cities, how many — into a " +
+		Description: "Turn a short description of a deployment — name, image, where, how many — into a " +
 			"complete Workload manifest, and report what rendering it settled. Nothing is read and nothing " +
 			"is changed, so render as often as it takes to get the manifest right. Read the manifest that " +
 			"comes back rather than assuming it says what was asked for, and read the notes: they name the " +
 			"choices that cannot be changed once the workload exists, the interface's address families and " +
 			"a public IPv4 address among them. Gather the inputs from the person rather than inventing " +
-			"them, and take city codes from compute_locations_list and the instance type from compute_instance_types_list. " +
+			"them, and take location names from compute_locations_list and the instance type from " +
+			"compute_instance_types_list. A placement either names locations or selects them by topology; use a " +
+			"locationSelector for \"every location in a city or region\", which also picks up locations added later. " +
 			"Load the workload-create skill before using this. Writes nothing.",
 	}, workloadRender(deps))
 
@@ -902,6 +924,7 @@ func toSpecInput(in WorkloadRenderInput) workloadspec.Input {
 		Name:         in.Name,
 		Image:        in.Image,
 		InstanceType: in.InstanceType,
+		RuntimeClass: in.RuntimeClass,
 		Network:      in.Network,
 		PublicIPv4:   in.PublicIPv4,
 		Labels:       in.Labels,
@@ -909,9 +932,10 @@ func toSpecInput(in WorkloadRenderInput) workloadspec.Input {
 
 	for _, p := range in.Placements {
 		out.Placements = append(out.Placements, workloadspec.Placement{
-			Name:        p.Name,
-			CityCodes:   p.CityCodes,
-			MinReplicas: p.MinReplicas,
+			Name:             p.Name,
+			Locations:        p.Locations,
+			LocationSelector: toLabelSelector(p.LocationSelector),
+			MinReplicas:      p.MinReplicas,
 		})
 	}
 	for _, p := range in.Ports {
@@ -944,6 +968,25 @@ func toSpecInput(in WorkloadRenderInput) workloadspec.Input {
 		}
 	}
 
+	return out
+}
+
+// toLabelSelector converts the tool's selector to the API's. The operator is
+// passed through verbatim: an unrecognized one is refused by the render's own
+// validation with the field path, which is more useful than silently dropping
+// the requirement here.
+func toLabelSelector(sel *RenderLocationSelector) *metav1.LabelSelector {
+	if sel == nil {
+		return nil
+	}
+	out := &metav1.LabelSelector{MatchLabels: sel.MatchLabels}
+	for _, req := range sel.MatchExpressions {
+		out.MatchExpressions = append(out.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      req.Key,
+			Operator: metav1.LabelSelectorOperator(req.Operator),
+			Values:   req.Values,
+		})
+	}
 	return out
 }
 
@@ -1000,6 +1043,13 @@ func renderNotes(in workloadspec.Input) []string {
 			notes = append(notes, fmt.Sprintf(
 				"Placement %q did not say how many instances to run, so it runs %d. There is no "+
 					"scaling to zero.", placementName(p), workloadspec.DefaultMinReplicas))
+		}
+		if p.LocationSelector != nil {
+			notes = append(notes, fmt.Sprintf(
+				"Placement %q selects its locations by topology rather than naming them, so it runs "+
+					"wherever the selector matches — including locations added later, which will "+
+					"start instances without this manifest changing. %s shows which locations match "+
+					"today.", placementName(p), ToolLocationsList))
 		}
 	}
 	if in.VM != nil && in.VM.BootImage == "" {

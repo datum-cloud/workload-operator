@@ -5,12 +5,15 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/yaml"
 
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
@@ -88,5 +91,61 @@ func TestServingLocationObjectIsRegistered(t *testing.T) {
 
 		_, err = apiutil.GVKForObject(object, scheme)
 		require.NoErrorf(t, err, "the watch object for source %q must be registered", source)
+	}
+}
+
+// TestControllerRoleGrantsPlacementLocationWatches is the RBAC half of the
+// locations dependency, and the regression guard for the watch the workload
+// reconciler installs on a project's placement locations.
+//
+// A watch the shipped ClusterRole does not permit is worse than a missing
+// feature. The informer retries the rejected list forever, that control plane's
+// cache never syncs, and controller-runtime blocks every controller on the
+// manager from starting — the workload reconciler, the referenced-data
+// reconciler and the deployment federator all stall, so nothing is federated,
+// no finalizer is written, and the pod stays Ready while reconciling nothing
+// until cluster engagement times out and it restarts into the same state.
+//
+// Both sources are covered: the manager is deployed with one ClusterRole and
+// locationSource is config, so whichever source a deployment selects has to be
+// permitted by the role that ships.
+func TestControllerRoleGrantsPlacementLocationWatches(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "config", "components", "controller_rbac", "role.yaml"))
+	require.NoError(t, err)
+
+	var role rbacv1.ClusterRole
+	require.NoError(t, yaml.Unmarshal(body, &role))
+
+	// granted reports whether the role permits the verb on the resource, taking
+	// the wildcards RBAC honours into account.
+	granted := func(group, resource, verb string) bool {
+		matches := func(values []string, want string) bool {
+			return slices.Contains(values, want) || slices.Contains(values, rbacv1.ResourceAll)
+		}
+		for _, rule := range role.Rules {
+			if len(rule.ResourceNames) > 0 {
+				continue
+			}
+			if matches(rule.APIGroups, group) && matches(rule.Resources, resource) && matches(rule.Verbs, verb) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// The kinds every source watches or lists, named as the API server names
+	// them in an RBAC rule.
+	for _, resource := range []struct{ group, name string }{
+		{"networking.datumapis.com", "locationbindings"},
+		{"networking.datumapis.com", "servinglocations"},
+		{"locations.miloapis.com", "locations"},
+		{"locations.miloapis.com", "servinglocations"},
+		{"services.miloapis.com", "serviceavailabilities"},
+	} {
+		for _, verb := range []string{"get", "list", "watch"} {
+			assert.Truef(t, granted(resource.group, resource.name, verb),
+				"the controller ClusterRole must grant %q on %s.%s: a watch it cannot list wedges the manager",
+				verb, resource.name, resource.group)
+		}
 	}
 }

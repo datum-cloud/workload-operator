@@ -17,9 +17,11 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
+	karmadaclusterv1alpha1 "github.com/karmada-io/api/cluster/v1alpha1"
 	karmadapolicyv1alpha1 "github.com/karmada-io/api/policy/v1alpha1"
 	computev1alpha "go.datum.net/compute/api/v1alpha"
 	networkingv1alpha "go.datum.net/network-services-operator/api/v1alpha"
+	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 )
 
 // ─── Scheme helpers ───────────────────────────────────────────────────────────
@@ -31,6 +33,7 @@ func newProjectScheme() *runtime.Scheme {
 	_ = autoscalingv2.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
 	_ = computev1alpha.AddToScheme(s)
+	_ = locationsv1alpha1.AddToScheme(s)
 	return s
 }
 
@@ -41,7 +44,9 @@ func newKarmadaScheme() *runtime.Scheme {
 	_ = corev1.AddToScheme(s)
 	_ = computev1alpha.AddToScheme(s)
 	_ = networkingv1alpha.AddToScheme(s)
+	_ = locationsv1alpha1.AddToScheme(s)
 	_ = karmadapolicyv1alpha1.Install(s)
+	_ = karmadaclusterv1alpha1.Install(s)
 	return s
 }
 

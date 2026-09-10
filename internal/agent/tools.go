@@ -99,20 +99,19 @@ type WorkloadView struct {
 type DeploymentView struct {
 	Name          string          `json:"name"`
 	Placement     string          `json:"placement,omitempty"`
-	CityCode      string          `json:"cityCode,omitempty"`
 	Location      string          `json:"location,omitempty"`
 	ReadyReplicas int32           `json:"readyReplicas"`
 	Conditions    []ConditionView `json:"conditions,omitempty"`
 }
 
 // InstanceView is an Instance's identity and conditions. The deployment,
-// placement and city come from the labels the controllers stamp on every
+// placement and location come from the labels the controllers stamp on every
 // instance, so no extra lookup is needed to say where one lives.
 type InstanceView struct {
 	Name       string          `json:"name"`
 	Deployment string          `json:"deployment,omitempty"`
 	Placement  string          `json:"placement,omitempty"`
-	CityCode   string          `json:"cityCode,omitempty"`
+	Location   string          `json:"location,omitempty"`
 	Conditions []ConditionView `json:"conditions,omitempty"`
 }
 
@@ -246,7 +245,7 @@ func RegisterTools(s *mcp.Server, deps DepsFor) {
 		Name:  ToolReasonExplain,
 		Title: "Explain a condition reason",
 		Description: "Explain any compute condition reason (e.g. \"QuotaExceeded\", \"ImageUnavailable\", " +
-			"\"CityCodeMismatch\"): what it means, which condition types carry it, whether it is " +
+			"\"LocationMismatch\"): what it means, which condition types carry it, whether it is " +
 			"user-actionable, a platform fault, or transient, how long a transient one should take " +
 			"(expectedWithin), and how to remediate it. Call with no " +
 			"argument to list the whole catalog. Use when you encounter a reason on a resource the " +
@@ -488,17 +487,13 @@ func toDeploymentViews(deployments []computev1alpha.WorkloadDeployment) []Deploy
 	out := make([]DeploymentView, 0, len(deployments))
 	for i := range deployments {
 		d := &deployments[i]
-		view := DeploymentView{
+		out = append(out, DeploymentView{
 			Name:          d.Name,
 			Placement:     d.Spec.PlacementName,
-			CityCode:      d.Spec.CityCode,
+			Location:      d.Spec.LocationRef.Name,
 			ReadyReplicas: d.Status.ReadyReplicas,
 			Conditions:    toConditionViews(d.Status.Conditions),
-		}
-		if d.Status.Location != nil {
-			view.Location = d.Status.Location.Name
-		}
-		out = append(out, view)
+		})
 	}
 	return out
 }
@@ -511,7 +506,7 @@ func toInstanceViews(instances []computev1alpha.Instance) []InstanceView {
 			Name:       inst.Name,
 			Deployment: inst.Labels[computev1alpha.WorkloadDeploymentNameLabel],
 			Placement:  inst.Labels[computev1alpha.PlacementNameLabel],
-			CityCode:   inst.Labels[computev1alpha.CityCodeLabel],
+			Location:   inst.Labels[computev1alpha.LocationLabel],
 			Conditions: toConditionViews(inst.Status.Conditions),
 		})
 	}

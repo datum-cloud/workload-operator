@@ -439,10 +439,10 @@ var catalog = []ReasonInfo{
 		Skill:       SkillPlacementTriage,
 	},
 	{
-		Reason:         computev1alpha.WorkloadDeploymentReasonCityCodeMismatch,
+		Reason:         computev1alpha.WorkloadDeploymentReasonLocationMismatch,
 		ConditionTypes: []string{computev1alpha.WorkloadDeploymentAvailable},
 		Actionability:  ActionabilityPlatform,
-		Explanation:    "Your workload asked to run in one city and was sent to another, so Datum is refusing to start it in the wrong place.",
+		Explanation:    "Your workload asked to run at one location and was sent to another, so Datum is refusing to start it in the wrong place.",
 		Remediation:    "Raise this with Datum — your placement request is fine; it was routed to the wrong place on their side.",
 		Skill:          SkillPlacementTriage,
 	},
@@ -513,6 +513,74 @@ var catalog = []ReasonInfo{
 		Explanation:    "Nothing in this placement is serving yet.",
 		Remediation:    "Look at what this placement created; the cause is there.",
 		Skill:          SkillWorkloadNotAvailable,
+	},
+	{
+		Reason:         computev1alpha.WorkloadReasonNoMatchingLocations,
+		ConditionTypes: []string{computev1alpha.WorkloadAvailable},
+		Actionability:  ActionabilityUser,
+		Explanation: "This placement resolves to no location, so nothing was created for it. Either none " +
+			"of the locations it names is ready with compute available, or its location selector " +
+			"matches none of the project's locations that are.",
+		Remediation: "Compare the placement against the project's locations, their topology " +
+			"(city code, region), and where compute is available. Name a location that exists and " +
+			"offers compute, or widen the selector until it matches one.",
+		Skill: SkillWorkloadNotAvailable,
+	},
+
+	// Runtime classes. A workload selects a class to say how it should be
+	// executed; the class is Datum's catalog object, and its Accepted status is
+	// the report from the provider that implements it.
+	{
+		Reason: computev1alpha.WorkloadDeploymentReasonRuntimeClassNotServed,
+		ConditionTypes: []string{
+			computev1alpha.WorkloadDeploymentAvailable,
+			computev1alpha.WorkloadAvailable,
+		},
+		Actionability: ActionabilityUser,
+		Explanation: "The runtime class this workload selected is not offered in the location this " +
+			"placement targets, so nothing here can be placed. Nothing else about the workload is " +
+			"checked until this clears.",
+		Remediation: "Select a runtime class the location offers, or a location that offers this " +
+			"class. The status message names both.",
+		Skill: SkillPlacementTriage,
+	},
+	{
+		Reason:         computev1alpha.RuntimeClassReasonAccepted,
+		ConditionTypes: []string{computev1alpha.RuntimeClassConditionAccepted},
+		Actionability:  ActionabilityTransient,
+		Explanation: "This runtime class is ready to use. The provider behind it has confirmed it can " +
+			"serve everything the class promises.",
+	},
+	{
+		Reason:         computev1alpha.RuntimeClassReasonPending,
+		ConditionTypes: []string{computev1alpha.RuntimeClassConditionAccepted},
+		Actionability:  ActionabilityTransient,
+		Explanation: "Datum has not reported back either way on this runtime class yet. That is " +
+			"expected briefly after a class is published or while the provider behind it is being " +
+			"rolled out.",
+		Remediation:      remediationWait,
+		Skill:            SkillStalledTransient,
+		ExpectedDuration: windowHandoff,
+	},
+	{
+		Reason:         computev1alpha.RuntimeClassReasonUnsupportedFeature,
+		ConditionTypes: []string{computev1alpha.RuntimeClassConditionAccepted},
+		Actionability:  ActionabilityPlatform,
+		Explanation: "This runtime class promises a capability the provider behind it cannot deliver. " +
+			"The status message names the capabilities. Instances in this class will not start " +
+			"until Datum fixes the class or the provider.",
+		Remediation: remediationEscalate + " In the meantime, select a different runtime class if " +
+			"one fits.",
+	},
+	{
+		Reason:         computev1alpha.RuntimeClassReasonContractNotHonored,
+		ConditionTypes: []string{computev1alpha.RuntimeClassConditionAccepted},
+		Actionability:  ActionabilityPlatform,
+		Explanation: "The provider behind this runtime class cannot keep part of what the class " +
+			"promises, such as the isolation it declares or a lifecycle operation it offers. The " +
+			"status message says which part.",
+		Remediation: remediationEscalate + " In the meantime, select a different runtime class if " +
+			"one fits.",
 	},
 }
 

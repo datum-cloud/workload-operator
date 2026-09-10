@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
+	servicesv1alpha1 "go.miloapis.com/service-catalog/api/v1alpha1"
 )
 
 // locationsCRDDir resolves the CRDs shipped by the locations module, so the
@@ -35,6 +36,25 @@ func locationsCRDDir(t *testing.T) string {
 	_, err = os.Stat(dir)
 	require.NoError(t, err)
 	return dir
+}
+
+// envtestLocationName is the one location every subtest below creates and
+// reads back.
+const envtestLocationName = "dfw"
+
+// serviceAvailabilityCRD resolves the ServiceAvailability CRD shipped by the
+// service-catalog module, for the same reason as locationsCRDDir.
+func serviceAvailabilityCRD(t *testing.T) string {
+	t.Helper()
+
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "go.miloapis.com/service-catalog").Output()
+	require.NoError(t, err, "the service-catalog module must be resolvable")
+
+	path := filepath.Join(strings.TrimSpace(string(out)), "config", "base", "crd", "bases",
+		"services.miloapis.com_serviceavailabilities.yaml")
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+	return path
 }
 
 // TestLocationsSource_AgainstAPIServer is the runtime half of the typed switch.
@@ -101,9 +121,9 @@ func TestLocationsSource_AgainstAPIServer(t *testing.T) {
 	t.Run("CRDs installed resolve and read back", func(t *testing.T) {
 		c := newClient()
 
-		require.NoError(t, c.Create(ctx, newLocation("dfw", testCityCode)))
+		require.NoError(t, c.Create(ctx, newLocation(envtestLocationName, testCityCode)))
 		require.NoError(t, c.Create(ctx, &locationsv1alpha1.ServingLocation{
-			ObjectMeta: metav1.ObjectMeta{Name: "dfw"},
+			ObjectMeta: metav1.ObjectMeta{Name: envtestLocationName},
 			Spec: locationsv1alpha1.ServingLocationSpec{
 				Topology: map[string]string{TopologyCityCodeKey: testCityCode},
 			},
@@ -117,7 +137,73 @@ func TestLocationsSource_AgainstAPIServer(t *testing.T) {
 		serving, err := ListServingLocations(ctx, c, SourceLocations)
 		require.NoError(t, err)
 		require.Len(t, serving, 1)
-		assert.Equal(t, "dfw", serving[0].Name)
+		assert.Equal(t, envtestLocationName, serving[0].Name)
 		assert.Equal(t, testCityCode, serving[0].CityCode())
+	})
+
+	// markReady sets the Ready condition on the location through the status
+	// subresource, the way the locations controller does.
+	markReady := func(t *testing.T, c client.Client) {
+		t.Helper()
+		var location locationsv1alpha1.Location
+		require.NoError(t, c.Get(ctx, client.ObjectKey{Name: envtestLocationName}, &location))
+		location.Status.Conditions = []metav1.Condition{{
+			Type: locationsv1alpha1.LocationConditionReady, Status: metav1.ConditionTrue,
+			Reason: "Serving", LastTransitionTime: metav1.Now(),
+		}}
+		require.NoError(t, c.Status().Update(ctx, &location))
+	}
+
+	t.Run("availability CRD absent enforces no gate", func(t *testing.T) {
+		c := newClient()
+		markReady(t, c)
+
+		// The absence must be recognisable for the same reason as above: a
+		// wrapping change would turn every project without the mirror into
+		// one where nothing can be placed.
+		var absent servicesv1alpha1.ServiceAvailabilityList
+		rawErr := c.List(ctx, &absent)
+		require.Error(t, rawErr, "the CRD really is absent, so the degrade is under test")
+		assert.True(t, kindNotInstalled(rawErr), "an absent CRD must stay recognisable as such: %T / %v", rawErr, rawErr)
+
+		found, err := ListPlacementLocations(ctx, c, SourceLocations)
+		require.NoError(t, err)
+		require.Len(t, found, 1)
+		assert.True(t, found[0].Placeable(), "with no availability to consult, Ready alone decides")
+	})
+
+	_, err = envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+		Paths: []string{serviceAvailabilityCRD(t)},
+	})
+	require.NoError(t, err)
+
+	t.Run("availability CRD installed gates on a compute record", func(t *testing.T) {
+		c := newClient()
+
+		found, err := ListPlacementLocations(ctx, c, SourceLocations)
+		require.NoError(t, err)
+		require.Len(t, found, 1)
+		assert.False(t, found[0].Placeable(), "the kind is served but no record says compute runs here")
+
+		availability := newComputeAvailability(envtestLocationName)
+		conditions := availability.Status.Conditions
+		availability.Status = servicesv1alpha1.ServiceAvailabilityStatus{}
+		require.NoError(t, c.Create(ctx, availability))
+		for i := range conditions {
+			conditions[i].Reason = "Available"
+			conditions[i].LastTransitionTime = metav1.Now()
+		}
+		availability.Status.Conditions = conditions
+		require.NoError(t, c.Status().Update(ctx, availability))
+
+		found, err = ListPlacementLocations(ctx, c, SourceLocations)
+		require.NoError(t, err)
+		require.Len(t, found, 1)
+		assert.True(t, found[0].Placeable(), "an Available compute record opens the gate")
+
+		available, enforced, err := AvailableLocations(ctx, c)
+		require.NoError(t, err)
+		assert.True(t, enforced)
+		assert.Equal(t, []string{envtestLocationName}, available.UnsortedList())
 	})
 }

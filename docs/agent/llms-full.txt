@@ -47,8 +47,8 @@ Workload
 
 WorkloadDeployment
   One Workload as it exists in one location. Created by compute, not by the
-  customer. This is where the location, the city, and the lookup of the
-  ConfigMaps and Secrets the workload references are settled.
+  customer. This is where the location and the lookup of the ConfigMaps and
+  Secrets the workload references are settled.
 
 Instance
   A single running unit within a deployment. Carries the most specific
@@ -90,12 +90,12 @@ user-actionable
   Something in the workload the customer wrote, or in their project's setup.
   They can fix it. Examples: ImageUnavailable, InstanceCrashing,
   ConfigurationError, QuotaExceeded, SourceNotFound, SourceTooLarge,
-  NetworkNotFound.
+  NetworkNotFound, NoMatchingLocations.
 
 platform fault
   Datum's to fix. No change to the workload will help, and suggesting one wastes
   the customer's time. Examples: NoMatchingLocation, AmbiguousServingLocation,
-  CityCodeMismatch, QuotaNoBudget, QuotaBackendUnavailable, QuotaMisconfigured,
+  LocationMismatch, QuotaNoBudget, QuotaBackendUnavailable, QuotaMisconfigured,
   QuotaProjectNotFound, SourceUnauthorized, Suspended.
 
 transient
@@ -188,8 +188,11 @@ A Workload is three things: a name, one instance template, and one or more
 placements. The template says what runs — either containers in a sandbox, or a
 virtual machine booting a full operating system — at one instance type, on one
 network interface, with whatever volumes the containers or the machine attach.
-Each placement names city codes and a replica count, so where it runs and how
-many of it there are live in the placement, not in the template.
+Each placement says where in one of two ways — a list of location names, or a
+selector over the topology those locations declare (city code, region), which
+places at every location matching it and picks up new ones as they appear — and
+a replica count. Where it runs and how many of it there are live in the
+placement, not in the template.
 
 Some of that is settled for good at create. The workload's name, the runtime
 kind, and the network interface — its name, the address families it carries,
@@ -229,10 +232,12 @@ there, and this section deliberately does not restate them.
                               steps
   compute_reason_explain      any reason, explained, classified, and — when
                               transient — the window it should clear inside
-  compute_locations_list      the city codes this project may place a workload
-                              in, taken from compute's availability records —
-                              a city absent from it is one compute is not
-                              offered in
+  compute_locations_list      the locations this project may place a workload
+                              in, with the topology each declares, taken from
+                              compute's availability records — a location
+                              absent from it is one compute is not offered in.
+                              Placements name these locations verbatim, or
+                              select them by their topology
   compute_networks_list       the networks an interface may attach to
   compute_quota_get           how much compute the project is allowed, and
                               what is left

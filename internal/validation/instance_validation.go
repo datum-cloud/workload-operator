@@ -3,7 +3,6 @@ package validation
 import (
 	"fmt"
 	"path"
-	"slices"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -30,19 +29,6 @@ const (
 	// defaultInstanceType is the only currently supported instance type.
 	defaultInstanceType = "datumcloud/d1-standard-2"
 )
-
-// SupportedInstanceTypes returns the instance types a Workload may ask for, in
-// the order they should be offered. Validation is the single place that decides
-// what is accepted, so anything that tells a customer what they may deploy —
-// the CLI, the MCP tools — asks here rather than keeping a second list that can
-// fall out of step with what the API will take.
-//
-// TODO(#137): this is a hand-maintained list of one. It should be read from a
-// served instance-type catalog, alongside the sizing that currently lives in
-// the instance controller.
-func SupportedInstanceTypes() []string {
-	return []string{defaultInstanceType}
-}
 
 func validateInstanceTemplate(
 	template computev1alpha.InstanceTemplateSpec,
@@ -99,6 +85,7 @@ func validateInstanceSpec(
 	allErrs = append(allErrs, volumeErrs...)
 
 	allErrs = append(allErrs, validateInstanceRuntimeSpec(spec.Runtime, volumes, fieldPath.Child("runtime"))...)
+	allErrs = append(allErrs, validateRuntimeClassSelection(spec, fieldPath, opts)...)
 	allErrs = append(allErrs, validateInstanceNetworkInterfaces(spec.NetworkInterfaces, fieldPath.Child("networkInterfaces"), opts)...)
 	allErrs = append(allErrs, validateReferencedDataAccess(spec, fieldPath, opts)...)
 
@@ -925,8 +912,8 @@ func validateInstanceRuntimeResources(resources computev1alpha.InstanceRuntimeRe
 	allErrs := field.ErrorList{}
 
 	// TODO(jreese) look up available instance types
-	if supported := SupportedInstanceTypes(); !slices.Contains(supported, resources.InstanceType) {
-		allErrs = append(allErrs, field.NotSupported(fieldPath, resources.InstanceType, supported))
+	if resources.InstanceType != defaultInstanceType {
+		allErrs = append(allErrs, field.NotSupported(fieldPath, resources.InstanceType, []string{defaultInstanceType}))
 	}
 
 	if resources.Requests != nil {

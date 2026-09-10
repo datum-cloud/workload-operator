@@ -44,12 +44,23 @@ func TestDiff(t *testing.T) {
 			existing: base(),
 			desired: base(func(in *Input) {
 				in.Placements = []Placement{
-					{Name: "eu", CityCodes: []string{"AMS", "FRA"}, MinReplicas: 1},
+					{Name: "eu", Locations: []string{"eu-west-ams-1", "eu-central-fra-1"}, MinReplicas: 1},
 				}
 			}),
 			want: []string{
-				`  + new placement "eu": cities=[AMS, FRA]`,
+				`  + new placement "eu": locations=[eu-west-ams-1, eu-central-fra-1]`,
 				`  - removed placement "us"`,
+			},
+		},
+		"a placement that selects locations is described by its selector": {
+			existing: nil,
+			desired: base(func(in *Input) {
+				in.Placements[0].Locations = nil
+				in.Placements[0].LocationSelector = cityCodeSelector(testCityCode)
+			}),
+			want: []string{
+				"  image:  → ghcr.io/acme/api:1.4.2",
+				`  + new placement "us": locationSelector=topology.datum.net/city-code=DFW`,
 			},
 		},
 		"creating from nothing": {
@@ -57,7 +68,7 @@ func TestDiff(t *testing.T) {
 			desired:  base(),
 			want: []string{
 				"  image:  → ghcr.io/acme/api:1.4.2",
-				`  + new placement "us": cities=[DFW]`,
+				`  + new placement "us": locations=[us-south-dfw-1]`,
 			},
 		},
 	}
