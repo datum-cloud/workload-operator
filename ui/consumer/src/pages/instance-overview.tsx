@@ -5,7 +5,17 @@
 import { CommandBlock } from '../components/cli-section';
 import { DetailList, StatusBadge } from '../components/detail-list';
 import { RecentInstanceLogs } from '../components/instance-logs';
+import { formatKpiValue } from '../components/metric-area-chart';
 import { useInstanceOutlet } from './instance-outlet-context';
+import {
+  albErrorRateQuery,
+  albP99Query,
+  albRpsQuery,
+  cpuUsageQuery,
+  memoryUsageQuery,
+  useInstanceMetricIdentity,
+} from '../lib/metrics-queries';
+import { usePrometheusCard } from '../lib/prometheus';
 import { instanceStatusToBadgeType, type Instance } from '../schema';
 import { Card, CardContent } from '@datum-cloud/datum-ui/card';
 import { useCopyToClipboard } from '@datum-cloud/datum-ui/hooks';
@@ -20,6 +30,7 @@ import {
   SquareTerminalIcon,
 } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router';
 
 const COMING_SOON = 'Coming soon';
 
@@ -154,7 +165,55 @@ function GeneralCard({ instance }: { instance: Instance }) {
   );
 }
 
-function MetricsCard() {
+function MetricsCard({
+  projectId,
+  instanceName,
+  proxyId,
+  metricsHref,
+}: {
+  projectId?: string;
+  instanceName: string;
+  proxyId?: string;
+  metricsHref: string;
+}) {
+  const { identity, isLoading: identityLoading } = useInstanceMetricIdentity(projectId, instanceName);
+  const enabled = !identityLoading && !!identity && !!projectId;
+  const cpuQuery = enabled && identity && projectId ? cpuUsageQuery(projectId, identity) : undefined;
+  const memoryQuery =
+    enabled && identity && projectId ? memoryUsageQuery(projectId, identity) : undefined;
+  const rpsQuery = projectId && proxyId ? albRpsQuery(projectId, proxyId) : undefined;
+  const p99Query = projectId && proxyId ? albP99Query(projectId, proxyId) : undefined;
+  const errorQuery = projectId && proxyId ? albErrorRateQuery(projectId, proxyId) : undefined;
+
+  const cpu = usePrometheusCard(cpuQuery, 'number', { enabled });
+  const memory = usePrometheusCard(memoryQuery, 'bytes', { enabled });
+  const rps = usePrometheusCard(rpsQuery, 'requestsPerSecond', { enabled: !!proxyId });
+  const p99 = usePrometheusCard(p99Query, 'milliseconds-auto', { enabled: !!proxyId });
+  const errors = usePrometheusCard(errorQuery, 'percent', { enabled: !!proxyId });
+
+  const kpis: Array<{ label: string; value: string }> = [
+    { label: 'CPU', value: cpu.data?.formattedValue ?? formatKpiValue(cpu.data?.value, 'number') },
+    { label: 'Memory', value: memory.data?.formattedValue ?? formatKpiValue(memory.data?.value, 'bytes') },
+    {
+      label: 'Requests',
+      value: proxyId
+        ? (rps.data?.formattedValue ?? formatKpiValue(rps.data?.value, 'requestsPerSecond'))
+        : COMING_SOON,
+    },
+    {
+      label: 'p99',
+      value: proxyId
+        ? (p99.data?.formattedValue ?? formatKpiValue(p99.data?.value, 'milliseconds-auto'))
+        : COMING_SOON,
+    },
+    {
+      label: 'Errors',
+      value: proxyId
+        ? (errors.data?.formattedValue ?? formatKpiValue(errors.data?.value, 'percent'))
+        : COMING_SOON,
+    },
+  ];
+
   return (
     <Card
       className="w-full flex-1 gap-0 overflow-hidden rounded-xl px-3 py-4 shadow sm:pt-6 sm:pb-4"
@@ -165,13 +224,17 @@ function MetricsCard() {
           <span className="text-base font-semibold">Metrics</span>
         </div>
         <div className="divide-border border-border flex divide-x overflow-x-auto overscroll-x-contain rounded-lg border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {['CPU', 'Memory', 'Requests', 'p99', 'Errors'].map((label) => (
-            <div key={label} className="flex min-w-24 flex-1 flex-col gap-1 px-3 py-3">
+          {kpis.map((kpi) => (
+            <div key={kpi.label} className="flex min-w-24 flex-1 flex-col gap-1 px-3 py-3">
               <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                {label}
+                {kpi.label}
               </p>
-              <p className="text-muted-foreground text-xs whitespace-nowrap sm:text-sm">
-                {COMING_SOON}
+              <p
+                className={cn(
+                  'text-xs whitespace-nowrap sm:text-sm',
+                  kpi.value === COMING_SOON && 'text-muted-foreground'
+                )}>
+                {kpi.value}
               </p>
             </div>
           ))}
@@ -179,23 +242,32 @@ function MetricsCard() {
         <div className="border-border bg-muted/40 text-muted-foreground flex h-36 items-center justify-center rounded-md border border-dashed text-xs">
           Network I/O — {COMING_SOON}
         </div>
-        <p className="text-muted-foreground text-xs">View full metrics →</p>
+        <Link
+          to={metricsHref}
+          className="text-muted-foreground hover:text-foreground text-xs transition-colors">
+          View full metrics →
+        </Link>
       </CardContent>
     </Card>
   );
 }
 
 export default function InstanceOverview() {
-  const { instance, workloadName, logsHref } = useInstanceOutlet();
+  const { instance, workloadName, logsHref, metricsHref, projectId, proxyId } = useInstanceOutlet();
 
   return (
     <>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="flex h-full flex-col gap-6">
           <GeneralCard instance={instance} />
-          <MetricsCard />
+          <MetricsCard
+            projectId={projectId}
+            instanceName={instance.name}
+            proxyId={proxyId}
+            metricsHref={metricsHref}
+          />
         </div>
-        <RecentInstanceLogs logsHref={logsHref} />
+        <RecentInstanceLogs logsHref={logsHref} projectId={projectId} proxyId={proxyId} />
       </div>
 
       <Card

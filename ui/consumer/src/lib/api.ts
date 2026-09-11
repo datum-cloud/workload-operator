@@ -52,7 +52,7 @@ export class ApiError extends Error {
   }
 }
 
-function getProjectScopedBase(projectId: string): string {
+export function getProjectScopedBase(projectId: string): string {
   // Project-scoped control-plane path, forwarded server-side by /api/proxy
   // with the user's token. Mirrors app/resources/base/utils.ts.
   return `/api/proxy/apis/resourcemanager.miloapis.com/v1alpha1/projects/${projectId}/control-plane`;
@@ -241,6 +241,56 @@ export function useInstance(
     queryKey: [PLUGIN_ID, 'instance', projectId, instanceName],
     enabled: !!projectId && !!instanceName,
     queryFn: () => fetchInstance(projectId as string, instanceName as string),
+    refetchInterval: REFETCH_INTERVAL_MS,
+    retry: false,
+  });
+}
+
+// ── Published URL (HTTPProxy / NetworkService) ───────────────────────────
+//
+// `datumctl compute url` creates an HTTPProxy + NetworkService labelled with
+// the workload name. ALB logs and Envoy metrics key off the HTTPProxy name.
+// 403/404/empty are treated as "not published" — the Logs tab stays empty
+// rather than failing the instance page.
+
+const HTTPPROXIES_PATH = '/apis/networking.datumapis.com/v1alpha/namespaces/default/httpproxies';
+
+interface RawHttpProxyList {
+  items?: Array<{ metadata?: { name?: string } }>;
+}
+
+export interface PublishedUrl {
+  /** HTTPProxy metadata.name — Envoy `gateway_name` and LogQL `route_name`. */
+  proxyName: string;
+}
+
+async function fetchPublishedUrl(
+  projectId: string,
+  workloadName: string
+): Promise<PublishedUrl | null> {
+  const selector = `${INSTANCE_LABELS.workloadName}=${workloadName}`;
+  const query = new URLSearchParams({ labelSelector: selector });
+  const url = `${getProjectScopedBase(projectId)}${HTTPPROXIES_PATH}?${query.toString()}`;
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (res.status === 403 || res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, `Request failed (${res.status}): ${HTTPPROXIES_PATH}`);
+  }
+  const body = (await res.json()) as RawHttpProxyList;
+  const proxyName = body.items?.find((item) => item.metadata?.name)?.metadata?.name;
+  return proxyName ? { proxyName } : null;
+}
+
+export function usePublishedUrl(
+  projectId: string | undefined,
+  workloadName: string | undefined
+): UseQueryResult<PublishedUrl | null, ApiError> {
+  return useQuery({
+    queryKey: [PLUGIN_ID, 'published-url', projectId, workloadName],
+    enabled: !!projectId && !!workloadName,
+    queryFn: () => fetchPublishedUrl(projectId as string, workloadName as string),
     refetchInterval: REFETCH_INTERVAL_MS,
     retry: false,
   });
