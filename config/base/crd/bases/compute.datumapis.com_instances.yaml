@@ -1354,6 +1354,8 @@ spec:
                 type: boolean
             type: object
         type: object
+    selectableFields:
+    - jsonPath: .spec.runtime.class
     served: true
     storage: true
     subresources:

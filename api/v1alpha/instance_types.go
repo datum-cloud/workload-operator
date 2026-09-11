@@ -946,6 +946,7 @@ type InstanceTemplateSpec struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:metadata:annotations="discovery.miloapis.com/parent-contexts=Project"
+// +kubebuilder:selectablefield:JSONPath=`.spec.runtime.class`
 
 // Instance is the Schema for the instances API
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
