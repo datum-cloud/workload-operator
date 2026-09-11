@@ -69,7 +69,7 @@ func validateRuntimeClassSelection(
 	// because that state is normal during a provider rollout and immediately
 	// after a class is published. If no provider ever claims the class,
 	// placement reports the workload as unplaceable.
-	if acceptance, message := runtimeclass.AcceptanceOf(selected); acceptance == runtimeclass.AcceptanceRejected {
+	if availability, message := runtimeclass.AvailabilityOf(selected); availability == runtimeclass.AvailabilityUnavailable {
 		reason := fmt.Sprintf("the %q runtime class cannot currently run instances", class)
 		if len(message) > 0 {
 			reason = fmt.Sprintf("%s: %s", reason, message)

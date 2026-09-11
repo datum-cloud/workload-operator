@@ -25,8 +25,8 @@ spec:
     - jsonPath: .spec.default
       name: Default
       type: boolean
-    - jsonPath: .status.conditions[?(@.type=="Accepted")].status
-      name: Accepted
+    - jsonPath: .status.conditions[?(@.type=="Available")].status
+      name: Available
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -39,7 +39,7 @@ spec:
       name: Startup
       priority: 1
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Accepted")].message
+    - jsonPath: .status.conditions[?(@.type=="Available")].message
       name: Message
       priority: 1
       type: string
@@ -122,7 +122,7 @@ spec:
                 description: |-
                   The controller that implements this class. A provider watches for classes
                   carrying its own controller name, claims them, and reports through the
-                  Accepted condition whether it can honor what they declare. A class whose
+                  Available condition whether it can honor what they declare. A class whose
                   controller never appears stays unclaimed, which this field makes visible.
 
                   The field says which provider realizes the class. It does not say where
@@ -225,7 +225,7 @@ spec:
                 message: Waiting for the class controller
                 reason: Pending
                 status: Unknown
-                type: Accepted
+                type: Available
             description: Status is what the controller implementing this class reports
               about it.
             properties:

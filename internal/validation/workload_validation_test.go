@@ -1135,7 +1135,7 @@ func TestValidateWorkloadUpdate_UnchangedImage(t *testing.T) {
 	opts := WorkloadValidationOptions{
 		Client:         fakeClient,
 		Context:        context.Background(),
-		ValidCityCodes: []string{testCityCodeDFW},
+		ValidLocations: []string{testCityCodeDFW},
 	}
 
 	t.Run("finalizer-style update leaving the image untouched is not rejected", func(t *testing.T) {

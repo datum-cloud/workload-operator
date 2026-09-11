@@ -61,10 +61,10 @@ func makeRuntimeClass(name string, tweaks ...func(*computev1alpha.RuntimeClass))
 
 func withDefault(class *computev1alpha.RuntimeClass) { class.Spec.Default = true }
 
-func withAccepted(status metav1.ConditionStatus, reason, message string) func(*computev1alpha.RuntimeClass) {
+func withAvailable(status metav1.ConditionStatus, reason, message string) func(*computev1alpha.RuntimeClass) {
 	return func(class *computev1alpha.RuntimeClass) {
 		class.Status.Conditions = []metav1.Condition{{
-			Type:    computev1alpha.RuntimeClassConditionAccepted,
+			Type:    computev1alpha.RuntimeClassConditionAvailable,
 			Status:  status,
 			Reason:  reason,
 			Message: message,
@@ -168,7 +168,7 @@ func TestValidateRuntimeClassSelection(t *testing.T) {
 			class: testClassBasalt,
 			catalog: runtimeclass.Catalog{
 				makeRuntimeClass(testClassBasalt,
-					withAccepted(metav1.ConditionFalse, computev1alpha.RuntimeClassReasonUnsupportedFeature, "no")),
+					withAvailable(metav1.ConditionFalse, computev1alpha.RuntimeClassReasonUnsupportedFeature, "no")),
 			},
 			expectedErrors: field.ErrorList{field.Forbidden(classPath, "")},
 		},
@@ -176,14 +176,14 @@ func TestValidateRuntimeClassSelection(t *testing.T) {
 			class: testClassBasalt,
 			catalog: runtimeclass.Catalog{
 				makeRuntimeClass(testClassBasalt,
-					withAccepted(metav1.ConditionUnknown, computev1alpha.RuntimeClassReasonPending, "waiting")),
+					withAvailable(metav1.ConditionUnknown, computev1alpha.RuntimeClassReasonPending, "waiting")),
 			},
 		},
-		"a class its controller accepted is admitted": {
+		"a class its controller serves is admitted": {
 			class: testClassBasalt,
 			catalog: runtimeclass.Catalog{
 				makeRuntimeClass(testClassBasalt,
-					withAccepted(metav1.ConditionTrue, computev1alpha.RuntimeClassReasonAccepted, "")),
+					withAvailable(metav1.ConditionTrue, computev1alpha.RuntimeClassReasonServed, "")),
 			},
 		},
 		"an unselected class with no default published is refused": {
