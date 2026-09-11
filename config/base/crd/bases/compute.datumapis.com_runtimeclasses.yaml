@@ -213,6 +213,28 @@ spec:
                       measure it.
                     type: string
                 type: object
+              networkAttachment:
+                description: |-
+                  How a guest in this class takes the network interface the platform gives
+                  it. The provider that publishes the class states it, because only the
+                  provider knows what its runtime expects.
+
+                  Leaving it empty is the right answer for any class whose guests take the
+                  interface the cell already gives them, and it is what every class
+                  published today does. An empty value asks the networking layer for
+                  nothing, so the cell's own setting continues to decide. Stating a value
+                  overrides that setting for every guest in the class, in every cell, so
+                  state one only for a class whose runtime cannot use what the cell would
+                  otherwise give it.
+
+                  The value is resolved when a deployment is created and then fixed for the
+                  life of each instance, so correcting it here moves new instances without
+                  disturbing running ones.
+                enum:
+                - Netns
+                - Hypervisor
+                - HypervisorDeclared
+                type: string
             required:
             - capabilities
             - controllerName

@@ -115,6 +115,29 @@ const (
 	RuntimeClassLifecycleSnapshot RuntimeClassLifecycleOperation = "Snapshot"
 )
 
+// RuntimeClassNetworkAttachment is how a guest in the class takes the network
+// interface the platform gives it. The platform reads it to wire the instance;
+// it is never handed to a runtime.
+//
+// +kubebuilder:validation:Enum=Netns;Hypervisor;HypervisorDeclared
+type RuntimeClassNetworkAttachment string
+
+const (
+	// RuntimeClassNetworkAttachmentNetns places the interface in the guest's
+	// network namespace, which is what an ordinary container takes.
+	RuntimeClassNetworkAttachmentNetns RuntimeClassNetworkAttachment = "Netns"
+
+	// RuntimeClassNetworkAttachmentHypervisor hands the interface to a
+	// hypervisor as a device that the hypervisor finds from what the node
+	// publishes.
+	RuntimeClassNetworkAttachmentHypervisor RuntimeClassNetworkAttachment = "Hypervisor"
+
+	// RuntimeClassNetworkAttachmentHypervisorDeclared hands the interface to a
+	// hypervisor as a device and has the platform state that device to the
+	// hypervisor. A runtime that reads no node state needs it.
+	RuntimeClassNetworkAttachmentHypervisorDeclared RuntimeClassNetworkAttachment = "HypervisorDeclared"
+)
+
 // RuntimeClassIsolation describes what separates a workload in the class from
 // other tenants' workloads. Multi-tenant customers report this boundary to
 // their own auditors, so the API publishes it and holds it stable across
@@ -194,12 +217,17 @@ type RuntimeClassLifecycle struct {
 // billing dimensions a class is metered on, and customers are billed against
 // the catalog. Restating a price here would create a second source of truth.
 //
-// Provider-specific parameters are deliberately absent as well. Everything here
-// is what a customer is promised, and the platform reserves the right to change
-// which runtime a provider uses to keep that promise. A provider slot on this
-// object would also put runtime configuration one RBAC mistake away from a
-// tenant, which is the escape path this design closes. Provider configuration
-// stays with the provider's own deployment.
+// This object carries the contract published to a customer, plus the minimum
+// the platform itself needs to wire an instance of the class. Nothing else
+// belongs here.
+//
+// Opaque provider parameters remain deliberately absent. The platform reserves
+// the right to change which runtime a provider uses to keep the published
+// promise, and a pass-through slot on this object would put runtime
+// configuration one RBAC mistake away from a tenant, which is the escape path
+// this design closes. Provider configuration stays with the provider's own
+// deployment. A field the platform reads itself, drawn from a closed set of
+// values, reaches no runtime and is not such a slot.
 type RuntimeClassSpec struct {
 	// The controller that implements this class. A provider watches for classes
 	// carrying its own controller name, claims them, and reports through the
@@ -252,6 +280,25 @@ type RuntimeClassSpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	Lifecycle RuntimeClassLifecycle `json:"lifecycle,omitempty"`
+
+	// How a guest in this class takes the network interface the platform gives
+	// it. The provider that publishes the class states it, because only the
+	// provider knows what its runtime expects.
+	//
+	// Leaving it empty is the right answer for any class whose guests take the
+	// interface the cell already gives them, and it is what every class
+	// published today does. An empty value asks the networking layer for
+	// nothing, so the cell's own setting continues to decide. Stating a value
+	// overrides that setting for every guest in the class, in every cell, so
+	// state one only for a class whose runtime cannot use what the cell would
+	// otherwise give it.
+	//
+	// The value is resolved when a deployment is created and then fixed for the
+	// life of each instance, so correcting it here moves new instances without
+	// disturbing running ones.
+	//
+	// +kubebuilder:validation:Optional
+	NetworkAttachment RuntimeClassNetworkAttachment `json:"networkAttachment,omitempty"`
 }
 
 // Condition types reported on a RuntimeClass.

@@ -10,7 +10,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	go.datum.net/network-services-operator v0.26.5-0.20260911135634-aeaa6ff1ab23
+	go.datum.net/network-services-operator v0.26.5-0.20260911235442-196ee79e9ebf
 	// Pinned by pseudo-version to the commit deployed to staging, which is the
 	// same one network-services-operator pins. The module publishes no tag yet.
 	go.miloapis.com/locations v0.0.0-20260825185141-507ac2cbd48c
