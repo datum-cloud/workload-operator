@@ -1307,6 +1307,13 @@ func (r *InstanceReconciler) writeBackToUpstream(ctx context.Context, instance *
 		Spec: instance.Spec,
 	}
 
+	// Carry the runtime class so a customer reading the projected Instance can
+	// see which execution tier it runs in. The label also lets a client select
+	// instances by tier without a field selector.
+	if class := instance.Labels[computev1alpha.RuntimeClassLabel]; class != "" {
+		writeBack.Labels[computev1alpha.RuntimeClassLabel] = class
+	}
+
 	// The hub's garbage collector reclaims every copy when the deployment is
 	// removed, with no cross-plane cascade and no dependence on the cell-side
 	// finalizer running.
