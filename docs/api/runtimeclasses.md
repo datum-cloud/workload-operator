@@ -73,7 +73,7 @@ they select from without reaching the platform control plane.
         <td>
           Status is what the controller implementing this class reports about it.<br/>
           <br/>
-            <i>Default</i>: map[conditions:[map[lastTransitionTime:1970-01-01T00:00:00Z message:Waiting for the class controller reason:Pending status:Unknown type:Accepted]]]<br/>
+            <i>Default</i>: map[conditions:[map[lastTransitionTime:1970-01-01T00:00:00Z message:Waiting for the class controller reason:Pending status:Unknown type:Available]]]<br/>
         </td>
         <td>false</td>
       </tr></tbody>
@@ -109,7 +109,7 @@ Spec is the published contract for this execution tier.
         <td>
           The controller that implements this class. A provider watches for classes
 carrying its own controller name, claims them, and reports through the
-Accepted condition whether it can honor what they declare. A class whose
+Available condition whether it can honor what they declare. A class whose
 controller never appears stays unclaimed, which this field makes visible.
 
 The field says which provider realizes the class. It does not say where

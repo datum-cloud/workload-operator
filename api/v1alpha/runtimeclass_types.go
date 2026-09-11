@@ -14,7 +14,7 @@ import (
 // can run. A cell advertises the classes it can serve separately, through
 // RuntimeClassServedLabel. The two are independent: a class can have a
 // controller and no capacity anywhere, or capacity in a cell whose controller
-// has not accepted the class.
+// does not serve the class.
 //
 // +kubebuilder:validation:MinLength=1
 // +kubebuilder:validation:MaxLength=253
@@ -203,7 +203,7 @@ type RuntimeClassLifecycle struct {
 type RuntimeClassSpec struct {
 	// The controller that implements this class. A provider watches for classes
 	// carrying its own controller name, claims them, and reports through the
-	// Accepted condition whether it can honor what they declare. A class whose
+	// Available condition whether it can honor what they declare. A class whose
 	// controller never appears stays unclaimed, which this field makes visible.
 	//
 	// The field says which provider realizes the class. It does not say where
@@ -256,20 +256,23 @@ type RuntimeClassSpec struct {
 
 // Condition types reported on a RuntimeClass.
 const (
-	// RuntimeClassConditionAccepted reports whether the controller named in
-	// spec.controllerName has claimed this class and can honor everything it
-	// declares. The condition stays Unknown until that controller reconciles
-	// the class, so a class that no controller implements is visibly
+	// RuntimeClassConditionAvailable reports whether the class is usable: the
+	// controller named in spec.controllerName has claimed it and can honor
+	// everything it declares. The condition stays Unknown until that controller
+	// reconciles the class, so a class that no controller implements is visibly
 	// unclaimed.
-	RuntimeClassConditionAccepted = "Accepted"
+	RuntimeClassConditionAvailable = "Available"
 )
 
-// Reasons for the Accepted condition. These are customer-facing: they appear
+// Reasons for the Available condition. These are customer-facing: they appear
 // when a customer asks why a tier they selected is not usable.
 const (
-	// RuntimeClassReasonAccepted is set when the class's controller has claimed
+	// RuntimeClassReasonServed is set when the class's controller has claimed
 	// it and can serve everything the class declares.
-	RuntimeClassReasonAccepted = "Accepted"
+	//
+	// The reason is unique across every condition compute explains to
+	// customers, which the explanation catalog indexes by reason alone.
+	RuntimeClassReasonServed = "Served"
 
 	// RuntimeClassReasonPending is the starting state and means no controller
 	// has reported on this class yet. Typically the provider that implements
@@ -321,11 +324,11 @@ type RuntimeClassStatus struct {
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="Isolation",type=string,JSONPath=`.spec.isolation.boundary`
 // +kubebuilder:printcolumn:name="Default",type=boolean,JSONPath=`.spec.default`
-// +kubebuilder:printcolumn:name="Accepted",type=string,JSONPath=`.status.conditions[?(@.type=="Accepted")].status`
+// +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Controller",type=string,JSONPath=`.spec.controllerName`,priority=1
 // +kubebuilder:printcolumn:name="Startup",type=string,JSONPath=`.spec.lifecycle.typicalStartupTime`,priority=1
-// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Accepted")].message`,priority=1
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].message`,priority=1
 type RuntimeClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -335,7 +338,7 @@ type RuntimeClass struct {
 
 	// Status is what the controller implementing this class reports about it.
 	//
-	// +kubebuilder:default={conditions:{{type:"Accepted",status:"Unknown",reason:"Pending",message:"Waiting for the class controller",lastTransitionTime:"1970-01-01T00:00:00Z"}}}
+	// +kubebuilder:default={conditions:{{type:"Available",status:"Unknown",reason:"Pending",message:"Waiting for the class controller",lastTransitionTime:"1970-01-01T00:00:00Z"}}}
 	Status RuntimeClassStatus `json:"status,omitempty"`
 }
 

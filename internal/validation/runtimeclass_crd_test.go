@@ -90,7 +90,7 @@ func TestRuntimeClassCRD(t *testing.T) {
 			// No controller has reported on a freshly registered class, which
 			// differs from a controller rejecting it.
 			require.Len(t, class.Status.Conditions, 1)
-			require.Equal(t, computev1alpha.RuntimeClassConditionAccepted, class.Status.Conditions[0].Type)
+			require.Equal(t, computev1alpha.RuntimeClassConditionAvailable, class.Status.Conditions[0].Type)
 			require.Equal(t, metav1.ConditionUnknown, class.Status.Conditions[0].Status)
 			require.Equal(t, computev1alpha.RuntimeClassReasonPending, class.Status.Conditions[0].Reason)
 		}
