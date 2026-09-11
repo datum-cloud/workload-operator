@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/distribution/reference"
 	"golang.org/x/crypto/ssh"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -717,10 +718,11 @@ func validateContainerCommon(
 		}
 	}
 
+	// The registry requirement is enforced separately, in validateWorkloadImages
+	// (workload_validation.go), so an update can skip re-checking an unchanged
+	// image.
 	if len(container.Image) == 0 {
 		allErrs = append(allErrs, field.Required(fieldPath.Child("image"), ""))
-
-		// TODO(jreese) validate container image name, ensure it's fully qualified
 	}
 
 	if container.Resources != nil {
@@ -737,6 +739,42 @@ func validateContainerCommon(
 	allErrs = append(allErrs, validateNamedPorts(container.Ports, fieldPath.Child("ports"))...)
 
 	return allErrs
+}
+
+// validateContainerImage rejects an image reference with no registry: left
+// unqualified, the node agent silently defaults one the caller never named,
+// and the pull then fails in a way that looks like a broken image, not a
+// misrouted one.
+func validateContainerImage(image string, fieldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if _, err := reference.ParseNormalizedNamed(image); err != nil {
+		return append(allErrs, field.Invalid(fieldPath, image, fmt.Sprintf("must be a valid image reference: %s", err)))
+	}
+
+	if !imageHasExplicitRegistry(image) {
+		allErrs = append(allErrs, field.Invalid(fieldPath, image,
+			"must include a registry, e.g. ghcr.io/acme/api:1.4.2"))
+	}
+
+	return allErrs
+}
+
+// imageHasExplicitRegistry reports whether the first path segment of image
+// is a registry host, not a namespace — mirroring distribution/reference's
+// unexported splitDockerDomain: a dot, a colon, "localhost", or an uppercase
+// letter marks it as a host.
+//
+// Must run on the raw string: reference.ParseNormalizedNamed always fills in
+// a default registry, which would make every image look explicit.
+func imageHasExplicitRegistry(image string) bool {
+	maybeDomain, _, ok := strings.Cut(image, "/")
+	if !ok {
+		return false
+	}
+	return maybeDomain == "localhost" ||
+		strings.ContainsAny(maybeDomain, ".:") ||
+		strings.ToLower(maybeDomain) != maybeDomain
 }
 
 // validateEnvFrom validates the envFrom field on a SandboxContainer.
