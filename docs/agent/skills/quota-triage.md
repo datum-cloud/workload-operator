@@ -11,8 +11,8 @@ service that evaluates it, and not the request compute files against it.
 ## Procedure
 
 1. **Get the real reason.** `QuotaNotGranted` on the Workload or
-   WorkloadDeployment is a pointer. Call `workload_diagnose`, or read the
-   Instance's `QuotaGranted` condition via `instances_list`. Never report
+   WorkloadDeployment is a pointer. Call `compute_workload_diagnose`, or read the
+   Instance's `QuotaGranted` condition via `compute_instances_list`. Never report
    `QuotaNotGranted` as the cause.
 
 2. **Separate the four cases.** They look alike and lead to opposite advice:
@@ -40,7 +40,7 @@ service that evaluates it, and not the request compute files against it.
    there, the checking service itself is stuck — treat it as
    `QuotaBackendUnavailable` and hand it to Datum.
 
-5. **Check the split.** `instances_list` shows how many instances were cleared
+5. **Check the split.** `compute_instances_list` shows how many instances were cleared
    and how many were not. Partial is the common case: the workload is serving at
    reduced capacity, which is worth saying explicitly.
 
@@ -64,7 +64,7 @@ against the tool you read it from, quoting the message you were given:
     "capability": "how much of the project's compute quota is left",
     "kind": "InsufficientDetail",
     "evidence": {
-      "tool": "instances_list",
+      "tool": "compute_instances_list",
       "observed": "QuotaGranted=False, QuotaExceeded, \"quota exceeded\"",
       "contradictedBy": "no requested or remaining amount in the response" }
 
