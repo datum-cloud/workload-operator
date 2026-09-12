@@ -255,6 +255,23 @@ one class may run its instances as containers on a host, another may provision a
 machine from a cloud provider. The platform's abstraction is the instance, not any
 particular realization of it, and this proposal does not narrow that.
 
+**Realization a neighboring system needs is published with the class.** Some classes need
+the networking layer to attach an interface differently, because their runtime is told
+about the device rather than discovering it. The provider that publishes the class states
+that alongside it, so adding a class carries its own answer and stays a single declarative
+act. Requiring an operator to edit configuration and roll a manager in every cell before a
+new class worked would make the class object documentation rather than an API.
+
+The class object holds the published contract plus the minimum the platform needs to wire
+an instance. This field is read by the platform and drawn from a closed set of values, so
+it never reaches a runtime; opaque provider parameters remain excluded. Because the
+catalog is readable where deployments are created and not in a cell, the answer is
+resolved once there and travels with the deployment, which also removes any chance of a
+deployment reaching a cell before the class does.
+
+A class that states nothing leaves the cell's own setting deciding, which is what every
+class published today does.
+
 **Capability gaps are validated, not silently dropped.** A class will not support
 everything the instance API can express — some won't support disk-backed volumes, some
 will constrain where images may be pulled from. Today an unsupported feature can be
